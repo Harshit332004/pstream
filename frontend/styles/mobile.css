@@ -1,0 +1,240 @@
+/* Mobile Optimizations */
+
+@media (max-width: 768px) {
+    :root {
+        --font-size-base: 0.8125rem;
+        --font-size-lg: 1rem;
+        --space-md: 0.75rem;
+        --space-lg: 1rem;
+    }
+
+    .search-input-group {
+        grid-template-columns: auto 1fr auto;
+    }
+
+    .tv-controls {
+        grid-template-columns: 1fr 1fr auto;
+        gap: var(--space-xs);
+    }
+
+    .player-controls {
+        flex-direction: column;
+        gap: var(--space-sm);
+    }
+
+    .controls-left,
+    .controls-right {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .history-container {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: var(--space-sm);
+    }
+
+    .btn-control {
+        padding: var(--space-xs) var(--space-xs);
+        font-size: var(--font-size-sm);
+    }
+}
+
+@media (max-width: 480px) {
+    :root {
+        --font-size-base: 0.75rem;
+        --font-size-lg: 0.9375rem;
+        --space-md: 0.5rem;
+        --space-lg: 0.75rem;
+    }
+
+    .main-content {
+        padding: var(--space-md);
+    }
+
+    .header {
+        padding: var(--space-sm);
+    }
+
+    .logo {
+        font-size: 1rem;
+    }
+
+    .search-input-group {
+        grid-template-columns: 1fr;
+    }
+
+    #search-btn {
+        width: 100%;
+    }
+
+    .tv-controls {
+        grid-template-columns: 1fr;
+    }
+
+    #play-tv-btn {
+        width: 100%;
+    }
+
+    .player-section {
+        border-radius: var(--radius-md);
+    }
+
+    .player-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .player-controls {
+        padding: var(--space-sm);
+        gap: var(--space-xs);
+    }
+
+    .controls-left,
+    .controls-right {
+        width: 100%;
+    }
+
+    .time-display {
+        min-width: auto;
+        font-size: 0.7rem;
+    }
+
+    .quality-select,
+    .source-select {
+        min-width: 80px;
+        font-size: 0.7rem;
+    }
+
+    .player-tip {
+        font-size: 0.65rem;
+        padding: var(--space-xs);
+        margin-top: var(--space-sm);
+    }
+
+    .history-container {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-sm);
+    }
+
+    .history-item-title {
+        font-size: 0.75rem;
+    }
+
+    .btn-ghost.small {
+        padding: var(--space-xs) var(--space-xs);
+        font-size: 0.65rem;
+    }
+
+    .footer {
+        padding: var(--space-md);
+        font-size: 0.65rem;
+    }
+}
+
+/* Android TV (Large screens with remote) */
+@media (min-width: 1920px) and (min-aspect-ratio: 16/9) {
+    :root {
+        --font-size-base: 1rem;
+        --font-size-lg: 1.5rem;
+        --space-md: 1.5rem;
+        --space-lg: 2rem;
+    }
+
+    .btn {
+        min-height: 50px;
+        font-size: var(--font-size-lg);
+        padding: var(--space-md) var(--space-lg);
+    }
+
+    .history-container {
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: var(--space-lg);
+    }
+
+    .history-item {
+        min-height: 200px;
+    }
+
+    .search-input-group {
+        grid-template-columns: auto 1fr auto;
+        gap: var(--space-md);
+    }
+
+    .player-controls {
+        gap: var(--space-lg);
+        padding: var(--space-lg);
+    }
+
+    .quality-select,
+    .source-select {
+        min-width: 150px;
+    }
+}
+
+/* Landscape mode (mobile) */
+@media (max-height: 500px) and (orientation: landscape) {
+    .player-section {
+        margin-bottom: var(--space-md);
+    }
+
+    .player-controls {
+        padding: var(--space-sm);
+    }
+
+    .player-tip {
+        display: none;
+    }
+
+    section {
+        margin-bottom: var(--space-md);
+    }
+}
+
+/* High DPI displays */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    body {
+        -webkit-font-smoothing: subpixel-antialiased;
+    }
+}
+
+/* Dark mode (already implemented) */
+@media (prefers-color-scheme: dark) {
+    /* Already using dark colors by default */
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+    .btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    .history-item-delete {
+        opacity: 0.7;
+    }
+
+    /* Increase tap targets */
+    input,
+    select,
+    button {
+        min-height: 44px;
+    }
+}
+
+/* Low-end device optimizations */
+@media (max-width: 320px) {
+    :root {
+        --font-size-base: 0.7rem;
+        --font-size-lg: 0.85rem;
+        --space-sm: 0.25rem;
+        --space-md: 0.375rem;
+    }
+
+    .logo {
+        font-size: 0.9rem;
+    }
+
+    .history-container {
+        grid-template-columns: 1fr;
+    }
+}

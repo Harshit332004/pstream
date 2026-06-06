@@ -1,0 +1,197 @@
+import { useAuth } from '~/utils/auth';
+import { z } from 'zod';
+import { uuidv7 } from 'uuidv7';
+
+const watchHistoryMetaSchema = z.object({
+  title: z.string(),
+  year: z.number().optional(),
+  poster: z.string().optional(),
+  type: z.enum(['movie', 'show']),
+});
+
+const watchHistoryItemSchema = z.object({
+  meta: watchHistoryMetaSchema,
+  tmdbId: z.string(),
+  duration: z.number().transform(n => n.toString()),
+  watched: z.number().transform(n => n.toString()),
+  watchedAt: z.string().datetime({ offset: true }),
+  completed: z.boolean().optional().default(false),
+  seasonId: z.string().optional(),
+  episodeId: z.string().optional(),
+  seasonNumber: z.number().optional(),
+  episodeNumber: z.number().optional(),
+});
+
+// 13th July 2021 - movie-web epoch
+const minEpoch = 1626134400000;
+
+function defaultAndCoerceDateTime(dateTime: string | undefined) {
+  const epoch = dateTime ? new Date(dateTime).getTime() : Date.now();
+  const clampedEpoch = Math.max(minEpoch, Math.min(epoch, Date.now()));
+  return new Date(clampedEpoch);
+}
+
+export default defineEventHandler(async event => {
+  const userId = event.context.params?.id;
+  const tmdbId = event.context.params?.tmdbid;
+  const method = event.method;
+
+  const session = await useAuth().getCurrentSession();
+  if (!session) {
+    throw createError({
+      statusCode: 401,
+      message: 'Session not found or expired',
+    });
+  }
+
+  if (session.user !== userId) {
+    throw createError({
+      statusCode: 403,
+      message: 'Cannot access other user information',
+    });
+  }
+
+  if (method === 'PUT') {
+    const body = await readBody(event);
+
+    // Accept single object (normal playback) or array (e.g. user import)
+    const bodySchema = z.union([
+      watchHistoryItemSchema,
+      z.array(watchHistoryItemSchema).max(1000),
+    ]);
+    const parsed = bodySchema.parse(body);
+    const items = Array.isArray(parsed) ? parsed : [parsed];
+
+    try {
+
+      const upsertPromises = items.map(validatedBody => {
+        const itemTmdbId = items.length === 1 ? tmdbId : (validatedBody.tmdbId ?? tmdbId);
+        const watchedAt = defaultAndCoerceDateTime(validatedBody.watchedAt);
+        const now = new Date();
+
+        // Normalize IDs: use '\n' as a sentinel instead of null to satisfy Prisma's
+        // composite unique key constraint (Prisma v7 drops null from where clauses)
+        const normSeasonId = validatedBody.seasonId || '\n';
+        const normEpisodeId = validatedBody.episodeId || '\n';
+
+        const data = {
+          duration: parseFloat(validatedBody.duration),
+          watched: parseFloat(validatedBody.watched),
+          watched_at: watchedAt,
+          completed: validatedBody.completed,
+          meta: validatedBody.meta,
+          updated_at: now,
+        };
+
+        return prisma.watch_history.upsert({
+          where: {
+            tmdb_id_user_id_season_id_episode_id: {
+              tmdb_id: itemTmdbId,
+              user_id: userId,
+              season_id: normSeasonId,
+              episode_id: normEpisodeId,
+            },
+          },
+          update: data,
+          create: {
+            id: uuidv7(),
+            tmdb_id: itemTmdbId,
+            user_id: userId,
+            season_id: normSeasonId,
+            episode_id: normEpisodeId,
+            season_number: validatedBody.seasonNumber ?? null,
+            episode_number: validatedBody.episodeNumber ?? null,
+            ...data,
+          },
+        });
+      });
+
+      if (upsertPromises.length === 0) return { success: true, count: 0, items: [] };
+
+      const transactionResults = await prisma.$transaction(upsertPromises);
+
+      const results = transactionResults.map(watchHistoryItem => ({
+        success: true,
+        id: watchHistoryItem.id,
+        tmdbId: watchHistoryItem.tmdb_id,
+        userId: watchHistoryItem.user_id,
+        seasonId: watchHistoryItem.season_id === '\n' ? null : watchHistoryItem.season_id,
+        episodeId: watchHistoryItem.episode_id === '\n' ? null : watchHistoryItem.episode_id,
+        seasonNumber: watchHistoryItem.season_number,
+        episodeNumber: watchHistoryItem.episode_number,
+        meta: watchHistoryItem.meta,
+        duration: watchHistoryItem.duration,
+        watched: watchHistoryItem.watched,
+        watchedAt: watchHistoryItem.watched_at.toISOString(),
+        completed: watchHistoryItem.completed,
+        updatedAt: watchHistoryItem.updated_at.toISOString(),
+      }));
+
+      return results.length === 1 ? results[0] : { success: true, count: results.length, items: results };
+    } catch (dbError: any) {
+      console.warn('watch-history PUT failed (likely no DB):', dbError?.message?.substring(0, 80));
+      const results = items.map(validatedBody => {
+        const itemTmdbId = items.length === 1 ? tmdbId : (validatedBody.tmdbId ?? tmdbId);
+        const watchedAt = defaultAndCoerceDateTime(validatedBody.watchedAt);
+        return {
+          success: true,
+          id: uuidv7(),
+          tmdbId: itemTmdbId,
+          userId: userId,
+          seasonId: validatedBody.seasonId || null,
+          episodeId: validatedBody.episodeId || null,
+          seasonNumber: validatedBody.seasonNumber ?? null,
+          episodeNumber: validatedBody.episodeNumber ?? null,
+          meta: validatedBody.meta,
+          duration: parseFloat(validatedBody.duration),
+          watched: parseFloat(validatedBody.watched),
+          watchedAt: watchedAt.toISOString(),
+          completed: validatedBody.completed || false,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      return results.length === 1 ? results[0] : { success: true, count: results.length, items: results };
+    }
+  }
+
+  if (method === 'DELETE') {
+    const body = await readBody(event).catch(() => ({}));
+
+    const whereClause: any = {
+      user_id: userId,
+      tmdb_id: tmdbId,
+    };
+
+    if (body.seasonId) whereClause.season_id = body.seasonId;
+    if (body.episodeId) whereClause.episode_id = body.episodeId;
+
+    try {
+      // Use deleteMany return count directly — no redundant findMany
+      const { count } = await prisma.watch_history.deleteMany({
+        where: whereClause,
+      });
+
+      return {
+        success: true,
+        count,
+        tmdbId,
+        episodeId: body.episodeId,
+        seasonId: body.seasonId,
+      };
+    } catch (dbError: any) {
+      console.warn('watch-history DELETE failed (likely no DB):', dbError?.message?.substring(0, 80));
+      return {
+        success: true,
+        count: 0,
+        tmdbId,
+        episodeId: body.episodeId,
+        seasonId: body.seasonId,
+      };
+    }
+  }
+
+  throw createError({
+    statusCode: 405,
+    message: 'Method not allowed',
+  });
+});

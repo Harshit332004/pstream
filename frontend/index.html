@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0a0f1a">
+    <meta name="description" content="SafeStream - Lightweight streaming with cross-device sync">
+    <title>SafeStream V2</title>
+    
+    <link rel="stylesheet" href="/styles/globals.css">
+    <link rel="stylesheet" href="/styles/player.css">
+    <link rel="stylesheet" href="/styles/mobile.css">
+    
+    <!-- HLS.js for streaming -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js"></script>
+    
+    <!-- Minimal preload optimization -->
+    <link rel="preconnect" href="https://api.themoviedb.org">
+    <link rel="dns-prefetch" href="https://api.themoviedb.org">
+</head>
+<body>
+    <div id="app">
+        <!-- Loading state -->
+        <div id="loading-screen" class="loading-screen hidden">
+            <div class="spinner"></div>
+            <p>Loading...</p>
+        </div>
+
+        <!-- Main app container -->
+        <div id="app-container" class="app-container">
+            <!-- Header -->
+            <header class="header">
+                <div class="header-content">
+                    <h1 class="logo">Stream<span class="accent">Safe</span></h1>
+                    <div class="header-stats">
+                        <span id="connection-status" class="status-indicator online" title="Connection status">●</span>
+                    </div>
+                </div>
+            </header>
+
+            <main class="main-content">
+                <!-- Search Section -->
+                <section class="search-section">
+                    <div class="search-container">
+                        <div class="search-input-group">
+                            <select id="media-type" class="select-input">
+                                <option value="movie">🎬 Movie</option>
+                                <option value="tv">📺 TV Show</option>
+                            </select>
+                            <input 
+                                type="text" 
+                                id="search-input" 
+                                class="text-input" 
+                                placeholder="Search..." 
+                                autocomplete="off"
+                            >
+                            <button id="search-btn" class="btn btn-primary">Search</button>
+                        </div>
+
+                        <!-- Search Results -->
+                        <div id="search-results" class="search-results hidden">
+                            <div id="results-list" class="results-list"></div>
+                        </div>
+                    </div>
+
+                    <!-- TV Selector (hidden by default) -->
+                    <div id="tv-selector" class="tv-selector hidden">
+                        <div class="tv-selector-content">
+                            <h3 id="tv-title" class="tv-title"></h3>
+                            <div class="tv-controls">
+                                <select id="season-select" class="select-input">
+                                    <option value="">Select Season</option>
+                                </select>
+                                <select id="episode-select" class="select-input">
+                                    <option value="">Select Episode</option>
+                                </select>
+                                <button id="play-tv-btn" class="btn btn-primary" disabled>▶ Play</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Player Section -->
+                <section id="player-section" class="player-section hidden">
+                    <div class="player-header">
+                        <div class="player-info">
+                            <h2 id="player-title" class="player-title"></h2>
+                            <span id="player-meta" class="player-meta"></span>
+                        </div>
+                        <button id="close-player-btn" class="btn btn-ghost">✕</button>
+                    </div>
+
+                    <div class="player-wrapper" id="player-wrapper">
+                        <video 
+                            id="video-player" 
+                            class="video-player" 
+                            crossorigin="anonymous" 
+                            playsinline
+                        ></video>
+                        
+                        <!-- Custom Subtitle Overlay -->
+                        <div id="subtitle-overlay" class="subtitle-overlay hidden"></div>
+
+                        <!-- Big Center Play/Pause & Skip Buttons Overlay -->
+                        <div class="player-center-controls" id="player-center-controls">
+                            <button id="overlay-skip-back" class="btn-overlay-skip" title="Skip back 10s">⏪ 10s</button>
+                            <button id="overlay-play-pause" class="btn-overlay-play" title="Play/Pause">▶</button>
+                            <button id="overlay-skip-forward" class="btn-overlay-skip" title="Skip forward 10s">10s ⏩</button>
+                        </div>
+
+                        <!-- Player Loader -->
+                        <div id="player-loader" class="player-loader hidden">
+                            <div class="loader-spinner"></div>
+                            <p id="loader-text">Loading stream...</p>
+                        </div>
+
+                        <!-- Custom Controls Bar -->
+                        <div class="custom-player-controls" id="custom-player-controls">
+                            <!-- Progress Bar -->
+                            <div class="progress-container">
+                                <input type="range" id="progress-bar" class="custom-progress" min="0" max="100" value="0" step="0.1">
+                                <div class="progress-fill-bar" id="progress-fill-bar"></div>
+                            </div>
+                            
+                            <!-- Control Buttons -->
+                            <div class="control-row">
+                                <div class="control-left">
+                                    <button id="custom-play-btn" class="ctrl-btn">▶</button>
+                                    <button id="custom-skip-back-btn" class="ctrl-btn" title="Skip -10s">⏪ 10s</button>
+                                    <button id="custom-skip-forward-btn" class="ctrl-btn" title="Skip +10s">10s ⏩</button>
+                                    <span id="custom-time-display" class="custom-time-display">0:00 / 0:00</span>
+                                </div>
+                                
+                                <div class="control-right">
+                                    <div class="volume-container">
+                                        <button id="custom-mute-btn" class="ctrl-btn">🔊</button>
+                                        <input type="range" id="volume-slider" class="volume-slider" min="0" max="1" step="0.05" value="1">
+                                    </div>
+                                    
+                                    <!-- Gear Settings Button -->
+                                    <div class="settings-menu-container">
+                                        <button id="custom-settings-btn" class="ctrl-btn" title="Settings">⚙️ Settings</button>
+                                        
+                                        <!-- Inline settings panel inside player -->
+                                        <div class="settings-panel hidden" id="settings-panel">
+                                            <div class="settings-section">
+                                                <h4>Quality</h4>
+                                                <div class="settings-options" id="settings-quality-list">
+                                                    <!-- Dynamically populated -->
+                                                </div>
+                                            </div>
+                                            <div class="settings-section">
+                                                <h4>Subtitles</h4>
+                                                <div class="settings-options" id="settings-subtitle-list">
+                                                    <!-- Dynamically populated -->
+                                                </div>
+                                            </div>
+                                            <div class="settings-section">
+                                                <h4>Sources</h4>
+                                                <div class="settings-options" id="settings-source-list">
+                                                    <!-- Dynamically populated -->
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <button id="custom-fullscreen-btn" class="ctrl-btn" title="Fullscreen">📺</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p class="player-tip">💡 Use ← → arrow keys to skip 10s | Space to play/pause | ESC to close</p>
+                </section>
+
+                <!-- History Section -->
+                <section class="history-section">
+                    <div class="history-header">
+                        <h2>Continue Watching</h2>
+                        <button id="clear-history-btn" class="btn btn-ghost small" style="display: none;">Clear</button>
+                    </div>
+                    <div id="history-container" class="history-container">
+                        <div class="empty-state">
+                            <p>No watch history</p>
+                            <span>Search for content above to get started</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Discovery Section -->
+                <section id="discovery-section" class="discovery-section">
+                    <h2>Trending</h2>
+                    <div id="trending-container" class="trending-container"></div>
+                </section>
+            </main>
+
+            <!-- Footer -->
+            <footer class="footer">
+                <p>SafeStream V2 • Lightweight Streaming</p>
+            </footer>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div id="toast-container" class="toast-container"></div>
+    </div>
+
+    <script type="module" src="/scripts/utils.js"></script>
+    <script type="module" src="/scripts/storage.js"></script>
+    <script type="module" src="/scripts/sync.js"></script>
+    <script type="module" src="/scripts/providers.js"></script>
+    <script type="module" src="/scripts/player.js"></script>
+    <script type="module" src="/scripts/main.js"></script>
+</body>
+</html>
