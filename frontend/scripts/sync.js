@@ -10,12 +10,9 @@ window.SyncEngine = {
     syncTimeout: null,
     
     init: () => {
-        // Generate or retrieve user ID
-        SyncEngine.userId = Storage.get('userId');
-        if (!SyncEngine.userId) {
-            SyncEngine.userId = 'user_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
-            Storage.set('userId', SyncEngine.userId, 3650);
-        }
+        // Use a single hardcoded global user ID to sync history across all browsers and devices
+        SyncEngine.userId = 'global_user';
+        Storage.set('userId', SyncEngine.userId, 3650);
         
         // Setup BroadcastChannel for tab communication
         if ('BroadcastChannel' in window) {
