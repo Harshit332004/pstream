@@ -5,7 +5,7 @@
 
 window.Providers = {
     backends: [
-        import.meta.env.VITE_BACKEND_URL || 'https://safestream-backend.onrender.com',
+        (import.meta.env.VITE_BACKEND_URL || 'https://safestream-backend.onrender.com').replace(/\/+$/, ''),
         'https://safestream-fallback.onrender.com' // Optional fallback
     ],
     

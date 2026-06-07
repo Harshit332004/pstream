@@ -9,6 +9,9 @@ export default defineNitroConfig({
     asyncContext: true,
     tasks: true,
   },
+  externals: {
+    inline: ['@p-stream/providers'],
+  },
   scheduledTasks: {
     // Daily cron jobs (midnight)
     '0 0 * * *': ['jobs:clear-metrics:daily'],

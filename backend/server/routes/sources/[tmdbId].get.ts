@@ -1,23 +1,10 @@
 import { defineEventHandler, getRouterParam, getQuery } from 'h3';
+import { makeProviders, makeStandardFetcher, targets } from '@p-stream/providers';
 
 /**
  * GET /sources/:tmdbId
  * Fetch video sources using @p-stream/providers scraping library
  */
-
-// Dynamic import for @p-stream/providers (ESM-only package)
-let providersModule: any = null;
-async function getProvidersModule() {
-  if (!providersModule) {
-    try {
-      providersModule = await import('@p-stream/providers');
-    } catch (e) {
-      console.error('Failed to import @p-stream/providers:', e);
-      providersModule = null;
-    }
-  }
-  return providersModule;
-}
 
 export default defineEventHandler(async (event) => {
   const tmdbId = getRouterParam(event, 'tmdbId');
@@ -34,20 +21,6 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const mod = await getProvidersModule();
-
-    if (!mod || !mod.makeProviders || !mod.makeStandardFetcher) {
-      console.warn('P-Stream providers module not available, returning empty sources');
-      return {
-        responseId: 'backend-sources-v1',
-        expiresAt: new Date(Date.now() + 3600000).toISOString(),
-        sources: [],
-        subtitles: [],
-        error: 'Provider library not available'
-      };
-    }
-
-    const { makeProviders, makeStandardFetcher, targets } = mod;
 
     // Create provider instance with server-side fetch
     const providers = makeProviders({
@@ -73,7 +46,7 @@ export default defineEventHandler(async (event) => {
     }
 
     // Run all providers with a timeout
-    const timeoutMs = 30000;
+    const timeoutMs = 8000;
     const scrapePromise = providers.runAll({ media });
 
     const result = await Promise.race([

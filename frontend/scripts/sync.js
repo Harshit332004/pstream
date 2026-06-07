@@ -4,7 +4,7 @@
  */
 
 window.SyncEngine = {
-    backendUrl: import.meta.env.VITE_BACKEND_URL || 'https://safestream-backend.onrender.com',
+    backendUrl: (import.meta.env.VITE_BACKEND_URL || 'https://safestream-backend.onrender.com').replace(/\/+$/, ''),
     userId: null,
     syncInterval: 10000, // 10 seconds
     syncTimeout: null,
