@@ -632,6 +632,15 @@ window.Player = {
     },
     
     onError: () => {
+        // Ignore errors if the player is closed or not playing
+        if (!Player.currentMedia) return;
+        
+        const src = Player.videoElement.src;
+        // Ignore errors caused by clearing/unloading the video source
+        if (!src || src === window.location.href || src.replace(/\/+$/, '') === window.location.origin) {
+            return;
+        }
+        
         const err = Player.videoElement.error;
         console.error('Video element error:', err);
         Player.handlePlaybackError(new Error(err ? err.message || `Code ${err.code}` : 'HTML5 Video Error'));
