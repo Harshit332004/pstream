@@ -15,6 +15,8 @@ window.Player = {
     controlsTimeout: null,
     progressInterval: null,
     isSettingsOpen: false,
+    isFallbackTriggered: false,
+    loadTimeout: null,
     
     init: () => {
         Player.videoElement = DOM.get('video-player');
@@ -83,6 +85,8 @@ window.Player = {
         Player.subtitleCues = [];
         DOM.get('subtitle-overlay').classList.add('hidden');
         Player.toggleSettings(false);
+        Player.isFallbackTriggered = false;
+        Player.clearLoadTimeout();
         
         try {
             const result = await Providers.getSources(
@@ -132,12 +136,19 @@ window.Player = {
         
         // Cleanup old HLS instance
         if (Player.hls) {
-            Player.hls.destroy();
+            try {
+                Player.hls.destroy();
+            } catch (e) {
+                console.error('Error destroying HLS on switch:', e);
+            }
             Player.hls = null;
         }
         
         Player.videoElement.pause();
         Player.videoElement.src = '';
+        
+        Player.isFallbackTriggered = false;
+        Player.startLoadTimeout();
         
         try {
             if (source.type === 'hls') {
@@ -149,7 +160,7 @@ window.Player = {
             Player.updateSubtitleMenu();
         } catch (e) {
             console.error('Failed to load source:', e);
-            showToast(`❌ Failed to load source`, 'error');
+            Player.handlePlaybackError(e);
         }
     },
     
@@ -158,6 +169,9 @@ window.Player = {
             showToast('HLS.js not available', 'error');
             return;
         }
+        
+        const sanitizedUrl = Player.sanitizeStreamUrl(source.url);
+        console.log('Loading HLS stream (sanitized):', sanitizedUrl);
         
         Player.hls = new Hls({
             debug: false,
@@ -175,6 +189,7 @@ window.Player = {
         });
         
         Player.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            Player.clearLoadTimeout();
             Player.updateQualityMenu();
             Player.showLoader(false);
             
@@ -191,21 +206,21 @@ window.Player = {
         Player.hls.on(Hls.Events.ERROR, (event, data) => {
             console.error('HLS Error:', data);
             if (data.fatal) {
-                if (Player.currentSourceIndex + 1 < Player.currentSources.length) {
-                    Player.switchSource(Player.currentSourceIndex + 1);
-                } else {
-                    showToast('All sources failed', 'error');
-                }
+                Player.handlePlaybackError(new Error(`HLS Fatal Error: ${data.details || data.type}`));
             }
         });
         
-        Player.hls.loadSource(source.url);
+        Player.hls.loadSource(sanitizedUrl);
         Player.hls.attachMedia(Player.videoElement);
     },
     
     loadDirectStream: (source) => {
-        Player.videoElement.src = source.url;
+        const sanitizedUrl = Player.sanitizeStreamUrl(source.url);
+        console.log('Loading Direct stream (sanitized):', sanitizedUrl);
+        
+        Player.videoElement.src = sanitizedUrl;
         Player.videoElement.onloadedmetadata = () => {
+            Player.clearLoadTimeout();
             Player.showLoader(false);
             Player.updateQualityMenu(); // direct sources typically don't have quality tiers
             
@@ -607,6 +622,7 @@ window.Player = {
     },
     
     onLoadedMetadata: () => {
+        Player.clearLoadTimeout();
         Player.showLoader(false);
     },
 
@@ -618,7 +634,7 @@ window.Player = {
     onError: () => {
         const err = Player.videoElement.error;
         console.error('Video element error:', err);
-        showToast('Playback error', 'error');
+        Player.handlePlaybackError(new Error(err ? err.message || `Code ${err.code}` : 'HTML5 Video Error'));
     },
     
     showLoader: (show, text = '') => {
@@ -682,9 +698,68 @@ window.Player = {
         Player.showControlsTemporarily();
     },
     
+    sanitizeStreamUrl: (url) => {
+        if (!url) return url;
+        const parts = url.split('?');
+        let path = parts[0];
+        path = path.replace(/%2F/gi, '/');
+        return parts.length > 1 ? `${path}?${parts.slice(1).join('?')}` : path;
+    },
+    
+    startLoadTimeout: () => {
+        Player.clearLoadTimeout();
+        Player.loadTimeout = setTimeout(() => {
+            console.warn('Playback load timeout (15s) triggered.');
+            Player.handlePlaybackError(new Error('Load timeout (15s)'));
+        }, 15000);
+    },
+    
+    clearLoadTimeout: () => {
+        if (Player.loadTimeout) {
+            clearTimeout(Player.loadTimeout);
+            Player.loadTimeout = null;
+        }
+    },
+    
+    handlePlaybackError: (err) => {
+        console.warn('Playback error encountered:', err);
+        Player.clearLoadTimeout();
+        
+        if (Player.isFallbackTriggered) return;
+        Player.isFallbackTriggered = true;
+        
+        if (Player.hls) {
+            try {
+                Player.hls.destroy();
+            } catch (e) {
+                console.error('Error destroying HLS on playback error:', e);
+            }
+            Player.hls = null;
+        }
+        
+        if (Player.videoElement) {
+            Player.videoElement.pause();
+            Player.videoElement.src = '';
+        }
+        
+        const nextIndex = Player.currentSourceIndex + 1;
+        if (nextIndex < Player.currentSources.length) {
+            showToast(`⚠️ Current stream failed. Trying alternative source #${nextIndex + 1}...`, 'warning', 2500);
+            setTimeout(() => {
+                Player.isFallbackTriggered = false;
+                Player.switchSource(nextIndex);
+            }, 1000);
+        } else {
+            Player.isFallbackTriggered = false;
+            Player.showLoader(false);
+            showToast('❌ All playback sources failed to load', 'error', 4000);
+        }
+    },
+    
     close: async () => {
         await Player.saveCurrentProgress();
         Player.stopProgressHeartbeat();
+        Player.clearLoadTimeout();
 
         if (Player.controlsTimeout) {
             clearTimeout(Player.controlsTimeout);
