@@ -716,6 +716,31 @@ window.Player = {
         } catch (e) {
             path = path.replace(/%2F/gi, '/').replace(/%2B/gi, '+').replace(/%3D/gi, '=');
         }
+        
+        if (parts.length > 1) {
+            try {
+                const queryParams = new URLSearchParams(parts[1]);
+                const headersStr = queryParams.get('headers');
+                if (headersStr) {
+                    let decodedHeaders = headersStr;
+                    if (headersStr.includes('%22') || headersStr.includes('%7B')) {
+                        decodedHeaders = decodeURIComponent(headersStr);
+                    }
+                    const headersJson = JSON.parse(decodedHeaders);
+                    
+                    // Inject the exact User-Agent used by the backend scraper
+                    const scraperUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+                    headersJson['User-Agent'] = scraperUA;
+                    headersJson['user-agent'] = scraperUA;
+                    
+                    queryParams.set('headers', JSON.stringify(headersJson));
+                }
+                return `${path}?${queryParams.toString()}`;
+            } catch (e) {
+                console.error('Failed to parse query params in sanitizeStreamUrl:', e);
+            }
+        }
+        
         return parts.length > 1 ? `${path}?${parts.slice(1).join('?')}` : path;
     },
     
