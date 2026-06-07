@@ -2,6 +2,7 @@ import { Counter, register, collectDefaultMetrics, Histogram, Summary, Registry 
 import { prisma } from './prisma';
 import { scopedLogger } from '~/utils/logger';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 const log = scopedLogger('metrics');
@@ -18,7 +19,8 @@ function getMetricsFileName(interval: string): string {
     monthly: METRICS_MONTHLY_FILE,
   };
   const name = fileMap[interval] ?? `.metrics_${interval}.json`;
-  return path.join(process.cwd(), name);
+  const metricsRoot = process.env.VERCEL ? os.tmpdir() : process.cwd();
+  return path.join(metricsRoot, name);
 }
 
 // Global registries
