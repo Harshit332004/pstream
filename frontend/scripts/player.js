@@ -702,7 +702,11 @@ window.Player = {
         if (!url) return url;
         const parts = url.split('?');
         let path = parts[0];
-        path = path.replace(/%2F/gi, '/');
+        try {
+            path = decodeURIComponent(path);
+        } catch (e) {
+            path = path.replace(/%2F/gi, '/').replace(/%2B/gi, '+').replace(/%3D/gi, '=');
+        }
         return parts.length > 1 ? `${path}?${parts.slice(1).join('?')}` : path;
     },
     
