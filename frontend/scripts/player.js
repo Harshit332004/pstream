@@ -13,6 +13,7 @@ window.Player = {
     activeSubtitleIndex: -1, // -1 means turned off
     subtitleCues: [],
     controlsTimeout: null,
+    progressInterval: null,
     isSettingsOpen: false,
     
     init: () => {
@@ -102,6 +103,7 @@ window.Player = {
             Player.activeSubtitleIndex = -1; // Default: off
             
             Player.switchSource(0);
+            Player.startProgressHeartbeat();
             
             // Update UI
             DOM.get('player-title').textContent = media.title;
@@ -261,20 +263,46 @@ window.Player = {
         // Sync Subtitles Overlay
         Player.syncSubtitles(time);
         
-        // Save progress periodically
-        if (Player.currentMedia && time > 0) {
-            const progress = {
-                tmdbId: Player.currentMedia.tmdbId,
-                type: Player.currentMedia.type,
-                title: Player.currentMedia.title,
-                season: Player.currentMedia.season,
-                episode: Player.currentMedia.episode,
-                timestamp: Math.floor(time),
-                duration: Math.floor(duration),
-                last_updated: Date.now()
-            };
-            
-            SyncEngine.saveProgress(progress);
+    },
+
+    startProgressHeartbeat: () => {
+        Player.stopProgressHeartbeat();
+        Player.progressInterval = setInterval(() => {
+            Player.saveCurrentProgress();
+        }, 2000);
+    },
+
+    stopProgressHeartbeat: () => {
+        if (Player.progressInterval) {
+            clearInterval(Player.progressInterval);
+            Player.progressInterval = null;
+        }
+    },
+
+    saveCurrentProgress: async () => {
+        if (!Player.currentMedia || !Player.videoElement) return;
+
+        const time = Player.videoElement.currentTime || 0;
+        const duration = Player.videoElement.duration || 0;
+        if (!Number.isFinite(time) || time <= 0) return;
+
+        const progress = {
+            tmdbId: Player.currentMedia.tmdbId,
+            type: Player.currentMedia.type,
+            title: Player.currentMedia.title,
+            season: Player.currentMedia.season,
+            episode: Player.currentMedia.episode,
+            timestamp: Math.floor(time),
+            duration: Number.isFinite(duration) ? Math.floor(duration) : 0,
+            last_updated: Date.now(),
+            completed: duration > 0 ? (time / duration) >= 0.9 : false
+        };
+
+        Player.currentMedia = { ...Player.currentMedia, ...progress };
+        SyncEngine.saveProgress(progress);
+
+        if (window.renderHistory) {
+            await window.renderHistory();
         }
     },
     
@@ -289,6 +317,7 @@ window.Player = {
         const duration = Player.videoElement.duration || 0;
         if (duration > 0) {
             Player.videoElement.currentTime = (percent / 100) * duration;
+            Player.saveCurrentProgress();
         }
     },
     
@@ -580,6 +609,11 @@ window.Player = {
     onLoadedMetadata: () => {
         Player.showLoader(false);
     },
+
+    onEnded: async () => {
+        await Player.saveCurrentProgress();
+        Player.stopProgressHeartbeat();
+    },
     
     onError: () => {
         const err = Player.videoElement.error;
@@ -644,10 +678,14 @@ window.Player = {
     
     skip: (seconds) => {
         Player.videoElement.currentTime = Math.max(0, Player.videoElement.currentTime + seconds);
+        Player.saveCurrentProgress();
         Player.showControlsTemporarily();
     },
     
-    close: () => {
+    close: async () => {
+        await Player.saveCurrentProgress();
+        Player.stopProgressHeartbeat();
+
         if (Player.controlsTimeout) {
             clearTimeout(Player.controlsTimeout);
         }
@@ -664,14 +702,6 @@ window.Player = {
         DOM.hide('subtitle-overlay');
         DOM.hide('player-section');
         Player.toggleSettings(false);
-        
-        if (Player.currentMedia) {
-            SyncEngine.saveProgress({
-                ...Player.currentMedia,
-                timestamp: Math.floor(Player.videoElement.currentTime),
-                duration: Math.floor(Player.videoElement.duration)
-            });
-        }
         
         Player.currentMedia = null;
         Player.currentSources = [];

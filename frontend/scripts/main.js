@@ -240,7 +240,11 @@ async function renderHistory() {
         el.className = 'history-item';
         
         const progress = item.duration ? (item.timestamp / item.duration) * 100 : 0;
-        const meta = item.type === 'tv' ? `S${item.season} E${item.episode}` : 'Movie';
+        const mediaMeta = item.type === 'tv' ? `S${item.season} E${item.episode}` : 'Movie';
+        const watchedMeta = item.duration
+            ? `${formatTime(item.timestamp || 0)} / ${formatTime(item.duration || 0)}`
+            : formatTime(item.timestamp || 0);
+        const meta = `${mediaMeta} - ${watchedMeta}`;
         
         el.innerHTML = `
             <div class="history-item-content">
@@ -258,7 +262,7 @@ async function renderHistory() {
         deleteBtn.innerHTML = '✕';
         deleteBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            Storage.history.remove(item.tmdbId, item.type);
+            Storage.history.remove(item.tmdbId, item.type, item.season, item.episode);
             await renderHistory();
         });
         el.appendChild(deleteBtn);
@@ -275,3 +279,5 @@ async function renderHistory() {
 window.addEventListener('storage', async () => {
     await renderHistory();
 });
+
+window.renderHistory = renderHistory;

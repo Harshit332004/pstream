@@ -71,7 +71,7 @@ window.SyncEngine = {
         SyncEngine.pushProgress(media);
     },
     
-    pushProgress: debounce(async (media) => {
+    pushProgress: async (media) => {
         if (!isOnline()) return;
         
         try {
@@ -103,7 +103,7 @@ window.SyncEngine = {
         } catch (e) {
             console.error('Failed to push progress:', e);
         }
-    }, 3000),
+    },
     
     pullHistory: async () => {
         if (!isOnline()) return;

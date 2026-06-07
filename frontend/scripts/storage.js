@@ -58,10 +58,10 @@ window.Storage = {
         
         add: (item) => {
             const history = Storage.history.get();
-            const key = `${item.tmdbId}_${item.type}`;
+            const key = Storage.history.getKey(item);
             
             const existing = history.findIndex(h => 
-                `${h.tmdbId}_${h.type}` === key
+                Storage.history.getKey(h) === key
             );
             
             if (existing >= 0) {
@@ -79,9 +79,15 @@ window.Storage = {
             return history;
         },
         
-        remove: (tmdbId, type) => {
+        getKey: (item) => {
+            const season = item.type === 'tv' ? (item.season || 0) : 0;
+            const episode = item.type === 'tv' ? (item.episode || 0) : 0;
+            return `${item.tmdbId}_${item.type}_${season}_${episode}`;
+        },
+        
+        remove: (tmdbId, type, season = 0, episode = 0) => {
             let history = Storage.history.get();
-            history = history.filter(h => !(h.tmdbId === tmdbId && h.type === type));
+            history = history.filter(h => Storage.history.getKey(h) !== Storage.history.getKey({ tmdbId, type, season, episode }));
             Storage.history.set(history);
             return history;
         },
