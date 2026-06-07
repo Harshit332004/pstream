@@ -173,16 +173,32 @@ window.Player = {
         const sanitizedUrl = Player.sanitizeStreamUrl(source.url);
         console.log('Loading HLS stream (sanitized):', sanitizedUrl);
         
+        // Custom loader to sanitize and decode URLs for all HLS requests
+        class CustomLoader extends Hls.DefaultConfig.loader {
+            constructor(config) {
+                super(config);
+                const originalLoad = this.load.bind(this);
+                this.load = (context, loaderConfig, callbacks) => {
+                    if (context && context.url) {
+                        context.url = Player.sanitizeStreamUrl(context.url);
+                    }
+                    originalLoad(context, loaderConfig, callbacks);
+                };
+            }
+        }
+
         Player.hls = new Hls({
             debug: false,
             enableWorker: true,
             maxBufferLength: 15,
             maxMaxBufferLength: 30,
+            pLoader: CustomLoader,
+            fLoader: CustomLoader,
             xhrSetup: (xhr, url) => {
                 const currentSource = Player.currentSources[Player.currentSourceIndex];
                 if (currentSource && currentSource.headers) {
                     Object.entries(currentSource.headers).forEach(([key, value]) => {
-                        try { xhr.setRequestHeader(key, value); } catch (e) { /* Headers bypass security check */ }
+                        try { xhr.setRequestHeader(key, value); } catch (e) { /* bypass security check */ }
                     });
                 }
             }
