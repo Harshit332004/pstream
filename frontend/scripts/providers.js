@@ -23,11 +23,7 @@ window.Providers = {
                 if (season) url.searchParams.set('season', season);
                 if (episode) url.searchParams.set('episode', episode);
                 
-                const response = await fetchWithTimeout(url.toString(), {
-                    headers: {
-                        'x-api-key': 'safestream-public'
-                    }
-                }, 20000);
+                const response = await fetchWithTimeout(url.toString(), {}, 20000);
                 
                 if (response.ok) {
                     const data = await response.json();
@@ -55,11 +51,7 @@ window.Providers = {
         try {
             const response = await fetchWithTimeout(
                 `${Providers.backends[Providers.currentBackendIndex]}/discover`,
-                {
-                    headers: {
-                        'x-api-key': 'safestream-public'
-                    }
-                },
+                {},
                 10000
             );
             

@@ -80,8 +80,7 @@ window.SyncEngine = {
                 {
                     method: 'PUT',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': 'safestream-public'
+                        'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
                         tmdbId: String(media.tmdbId),
@@ -112,11 +111,7 @@ window.SyncEngine = {
         try {
             const response = await fetchWithTimeout(
                 `${SyncEngine.backendUrl}/users/${SyncEngine.userId}/watch-history`,
-                {
-                    headers: {
-                        'x-api-key': 'safestream-public'
-                    }
-                },
+                {},
                 5000
             );
             
@@ -162,10 +157,7 @@ window.SyncEngine = {
                 await fetchWithTimeout(
                     `${SyncEngine.backendUrl}/users/${SyncEngine.userId}/watch-history`,
                     {
-                        method: 'DELETE',
-                        headers: {
-                            'x-api-key': 'safestream-public'
-                        }
+                        method: 'DELETE'
                     },
                     5000
                 );
