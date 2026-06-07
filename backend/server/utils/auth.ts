@@ -64,16 +64,17 @@ export function useAuth() {
 
   const makeSessionToken = (session: { id: string }) => {
     const runtimeConfig = useRuntimeConfig();
-    const cryptoSecret = runtimeConfig.cryptoSecret || process.env.CRYPTO_SECRET;
+    const cryptoSecret = runtimeConfig.cryptoSecret || process.env.CRYPTO_SECRET || process.env.JWT_SECRET;
 
     if (!cryptoSecret) {
       console.error('CRYPTO_SECRET is missing from both runtime config and environment');
       console.error('Available runtime config keys:', Object.keys(runtimeConfig));
       console.error('Environment variables:', {
         CRYPTO_SECRET: process.env.CRYPTO_SECRET ? 'SET' : 'NOT SET',
+        JWT_SECRET: process.env.JWT_SECRET ? 'SET' : 'NOT SET',
         NODE_ENV: process.env.NODE_ENV,
       });
-      throw new Error('CRYPTO_SECRET environment variable is not set');
+      throw new Error('CRYPTO_SECRET or JWT_SECRET environment variable is not set');
     }
 
     return sign({ sid: session.id }, cryptoSecret, {
@@ -84,7 +85,7 @@ export function useAuth() {
   const verifySessionToken = (token: string) => {
     try {
       const runtimeConfig = useRuntimeConfig();
-      const cryptoSecret = runtimeConfig.cryptoSecret || process.env.CRYPTO_SECRET;
+      const cryptoSecret = runtimeConfig.cryptoSecret || process.env.CRYPTO_SECRET || process.env.JWT_SECRET;
 
       if (!cryptoSecret) {
         console.error('CRYPTO_SECRET is missing for token verification');

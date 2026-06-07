@@ -3,6 +3,7 @@ config();
 import { version } from './server/utils/config';
 //https://nitro.unjs.io/config
 export default defineNitroConfig({
+  preset: process.env.VERCEL ? 'vercel' : undefined,
   srcDir: 'server',
   compatibilityDate: '2025-03-05',
   experimental: {
@@ -30,7 +31,7 @@ export default defineNitroConfig({
         captchaClientKey: process.env.CAPTCHA_CLIENT_KEY || '',
       },
     },
-    cryptoSecret: process.env.CRYPTO_SECRET,
+    cryptoSecret: process.env.CRYPTO_SECRET || process.env.JWT_SECRET,
     tmdbApiKey: process.env.TMDB_API_KEY,
     trakt: {
       clientId: process.env.TRAKT_CLIENT_ID,

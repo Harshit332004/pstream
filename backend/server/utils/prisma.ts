@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 const globalForPrisma = globalThis as unknown as {
@@ -10,7 +11,8 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 // Simple filesystem database fallback
-const dbDir = path.resolve(process.cwd(), '.data/db');
+const fallbackRoot = process.env.VERCEL ? os.tmpdir() : process.cwd();
+const dbDir = path.resolve(fallbackRoot, '.data/db');
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
