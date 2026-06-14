@@ -1,13 +1,8 @@
 import { defineEventHandler, getRouterParam, getQuery, setResponseHeaders, setResponseHeader, sendStream, getHeader, createError } from 'h3';
 import { Readable } from 'node:stream';
 
-/**
- * GET /proxy/...
- * Catch-all route to proxy HLS (.m3u8) streams and video chunks (.ts, .mp4) through the backend.
- * Bypasses client-side CORS issues, strips leaking browser headers, and spoofs referrer/UA/origin.
- */
 export default defineEventHandler(async (event) => {
-  // 1. Pre-flight & Global CORS Headers (always applied first)
+  // 1. Pre-flight & Global CORS Headers
   setResponseHeaders(event, {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
@@ -16,7 +11,6 @@ export default defineEventHandler(async (event) => {
     'Access-Control-Max-Age': '86400',
   });
 
-  // Handle CORS OPTIONS preflight request immediately
   if (event.node.req.method === 'OPTIONS') {
     event.node.res.statusCode = 204;
     return '';
@@ -26,33 +20,25 @@ export default defineEventHandler(async (event) => {
   const query = getQuery(event);
   const host = query.host as string;
   if (!host) {
-    throw createError({
-      statusCode: 400,
-      message: 'Missing host query parameter',
-    });
+    throw createError({ statusCode: 400, message: 'Missing host query parameter' });
   }
 
   const allPath = getRouterParam(event, 'all') || '';
-  
-  // Construct the target URL (preserving wildcard path and other query parameters like auth)
+
   let targetUrl: URL;
   try {
     targetUrl = new URL(allPath, host);
   } catch (err) {
-    throw createError({
-      statusCode: 400,
-      message: 'Invalid target host or path combination',
-    });
+    throw createError({ statusCode: 400, message: 'Invalid target host or path combination' });
   }
 
-  // Forward all query parameters except our custom routing parameters
   for (const [key, value] of Object.entries(query)) {
     if (key !== 'host' && key !== 'headers' && value !== undefined) {
       targetUrl.searchParams.set(key, String(value));
     }
   }
 
-  // 3. Aggressive Header Sanitization (prevent Cloudflare bot detection / leak of server proxy)
+  // 3. Aggressive Header Sanitization
   const queryHeadersStr = query.headers as string | undefined;
   const upstreamHeaders: Record<string, string> = {
     'accept': '*/*',
@@ -65,20 +51,15 @@ export default defineEventHandler(async (event) => {
       if (decoded.includes('%22') || decoded.includes('%7B')) {
         decoded = decodeURIComponent(decoded);
       }
-      
+
       const parsed = JSON.parse(decoded);
       for (const [k, v] of Object.entries(parsed)) {
         if (typeof v === 'string') {
           const lowerKey = k.toLowerCase();
-          if (lowerKey === 'user-agent') {
-            upstreamHeaders['User-Agent'] = v;
-          } else if (lowerKey === 'referer') {
-            upstreamHeaders['Referer'] = v;
-          } else if (lowerKey === 'origin') {
-            upstreamHeaders['Origin'] = v;
-          } else {
-            upstreamHeaders[k] = v;
-          }
+          if (lowerKey === 'user-agent') upstreamHeaders['User-Agent'] = v;
+          else if (lowerKey === 'referer') upstreamHeaders['Referer'] = v;
+          else if (lowerKey === 'origin') upstreamHeaders['Origin'] = v;
+          else upstreamHeaders[k] = v;
         }
       }
     } catch (e) {
@@ -86,12 +67,10 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // Fallback User-Agent if none specified in the query parameters
   if (!upstreamHeaders['User-Agent']) {
     upstreamHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
   }
 
-  // Forward Range header from client if present (essential for seeking/partial content stream requests)
   const rangeHeader = getHeader(event, 'range');
   if (rangeHeader) {
     upstreamHeaders['range'] = rangeHeader;
@@ -106,17 +85,13 @@ export default defineEventHandler(async (event) => {
       headers: upstreamHeaders,
     });
 
-    // Handle non-OK upstream responses gracefully (while keeping CORS headers)
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
       event.node.res.statusCode = response.status;
-      if (response.statusText) {
-        event.node.res.statusMessage = response.statusText;
-      }
+      if (response.statusText) event.node.res.statusMessage = response.statusText;
       return errorBody;
     }
 
-    // 5. Copy safe response headers back to client
     const headersToForward = [
       'content-type',
       'content-length',
@@ -126,23 +101,75 @@ export default defineEventHandler(async (event) => {
       'expires',
     ];
 
+    // ==========================================
+    // NEW LOGIC: THE M3U8 INTERCEPTOR & REWRITER
+    // ==========================================
+    const contentType = response.headers.get('content-type') || '';
+    const isM3u8 = contentType.includes('mpegurl') || contentType.includes('mpegURL') || targetUrl.pathname.endsWith('.m3u8');
+
+    if (isM3u8) {
+      const text = await response.text();
+      const lines = text.split('\n');
+
+      const rewrittenLines = lines.map(line => {
+        const trimmed = line.trim();
+        // If the line is not empty and doesn't start with '#', it is a media URI
+        if (trimmed && !trimmed.startsWith('#')) {
+          try {
+            // Resolve the chunk URI against the target URL
+            const chunkUrl = new URL(trimmed, targetUrl.toString());
+
+            // Construct the NEW proxy route for this chunk
+            const proxyPath = `/proxy${chunkUrl.pathname}`;
+            const proxyParams = new URLSearchParams();
+
+            // 1. Force the target host to remain the same
+            proxyParams.set('host', chunkUrl.origin);
+
+            // 2. Persist our spoofed headers for the chunk
+            if (queryHeadersStr) {
+              proxyParams.set('headers', queryHeadersStr);
+            }
+
+            // 3. Keep any auth/tokens that were on the chunk URL itself
+            for (const [key, val] of chunkUrl.searchParams.entries()) {
+              proxyParams.set(key, val);
+            }
+
+            return `${proxyPath}?${proxyParams.toString()}`;
+          } catch (e) {
+            return line; // Fallback
+          }
+        }
+        return line;
+      });
+
+      const rewrittenM3u8 = rewrittenLines.join('\n');
+
+      // Set headers, but manually calculate the new Content-Length
+      for (const h of headersToForward) {
+        if (h === 'content-length') continue;
+        const value = response.headers.get(h);
+        if (value) setResponseHeader(event, h, value);
+      }
+      setResponseHeader(event, 'content-length', Buffer.byteLength(rewrittenM3u8));
+      event.node.res.statusCode = response.status;
+      return rewrittenM3u8;
+    }
+
+    // ==========================================
+    // 5. Standard streaming for binary Video Chunks (.ts, .mp4)
+    // ==========================================
     for (const h of headersToForward) {
       const value = response.headers.get(h);
-      if (value) {
-        setResponseHeader(event, h, value);
-      }
+      if (value) setResponseHeader(event, h, value);
     }
 
     event.node.res.statusCode = response.status;
-    if (response.statusText) {
-      event.node.res.statusMessage = response.statusText;
-    }
+    if (response.statusText) event.node.res.statusMessage = response.statusText;
 
-    if (!response.body) {
-      return '';
-    }
+    if (!response.body) return '';
 
-    // 6. Seamlessly stream response back using h3 sendStream
     const nodeStream = Readable.fromWeb(response.body as any);
     return sendStream(event, nodeStream);
 
