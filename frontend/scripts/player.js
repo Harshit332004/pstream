@@ -747,6 +747,12 @@ window.Player = {
                     }
                     // Validate that headers are valid JSON, re-serialize cleanly
                     const headersJson = JSON.parse(decodedHeaders);
+                    
+                    // Inject the exact User-Agent used by the scraper to ensure proxy validation passes
+                    const scraperUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+                    headersJson['User-Agent'] = scraperUA;
+                    headersJson['user-agent'] = scraperUA;
+                    
                     queryParams.set('headers', JSON.stringify(headersJson));
                 }
                 return `${path}?${queryParams.toString()}`;
