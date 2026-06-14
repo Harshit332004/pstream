@@ -22,6 +22,10 @@ window.Player = {
         Player.videoElement = DOM.get('video-player');
         if (!Player.videoElement) return;
         
+        // Prevent browser from sending cookies/credentials on cross-origin stream requests
+        // This avoids triggering stricter CORS requirements on proxy servers
+        Player.videoElement.crossOrigin = 'anonymous';
+        
         // Video event listeners
         Player.videoElement.addEventListener('timeupdate', () => Player.onTimeUpdate());
         Player.videoElement.addEventListener('play', () => Player.onPlayStateChange(true));
@@ -187,6 +191,12 @@ window.Player = {
             }
         }
 
+        // NOTE: Do NOT add xhrSetup here. The proxy reads forwarding headers
+        // (Referer, Origin, User-Agent) from the URL query parameter (?headers={...}),
+        // NOT from the browser's actual HTTP headers. Setting headers via xhrSetup
+        // is impossible anyway (they are forbidden browser headers), and the mere
+        // presence of xhrSetup causes Chrome/Edge to send Origin + Sec-Fetch-*
+        // headers that trigger 403 Forbidden from the proxy server.
         Player.hls = new Hls({
             debug: false,
             enableWorker: true,
@@ -194,14 +204,6 @@ window.Player = {
             maxMaxBufferLength: 30,
             pLoader: CustomLoader,
             fLoader: CustomLoader,
-            xhrSetup: (xhr, url) => {
-                const currentSource = Player.currentSources[Player.currentSourceIndex];
-                if (currentSource && currentSource.headers) {
-                    Object.entries(currentSource.headers).forEach(([key, value]) => {
-                        try { xhr.setRequestHeader(key, value); } catch (e) { /* bypass security check */ }
-                    });
-                }
-            }
         });
         
         Player.hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -738,17 +740,13 @@ window.Player = {
                 const queryParams = new URLSearchParams(parts[1]);
                 const headersStr = queryParams.get('headers');
                 if (headersStr) {
+                    // Fix double-encoded headers if the backend or URL construction encoded them twice
                     let decodedHeaders = headersStr;
                     if (headersStr.includes('%22') || headersStr.includes('%7B')) {
                         decodedHeaders = decodeURIComponent(headersStr);
                     }
+                    // Validate that headers are valid JSON, re-serialize cleanly
                     const headersJson = JSON.parse(decodedHeaders);
-                    
-                    // Inject the exact User-Agent used by the backend scraper
-                    const scraperUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
-                    headersJson['User-Agent'] = scraperUA;
-                    headersJson['user-agent'] = scraperUA;
-                    
                     queryParams.set('headers', JSON.stringify(headersJson));
                 }
                 return `${path}?${queryParams.toString()}`;
