@@ -110,7 +110,7 @@ pub fn run() {
 
           if let Ok(parsed_headers) = serde_json::from_str::<HashMap<String, String>>(&decoded_json) {
             for (k, v) in parsed_headers {
-              let lower_key = k.toLowerCase();
+              let lower_key = k.to_lowercase();
               if let Ok(hdr_name) = reqwest::header::HeaderName::from_bytes(lower_key.as_bytes()) {
                 if let Ok(hdr_val) = reqwest::header::HeaderValue::from_str(&v) {
                   client_headers.insert(hdr_name, hdr_val);
