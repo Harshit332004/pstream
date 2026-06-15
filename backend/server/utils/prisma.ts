@@ -201,7 +201,7 @@ if (databaseUrl && databaseUrl.trim() !== '') {
       connectionTimeoutMillis: 10000,
       idleTimeoutMillis: 300000,
     });
-    const adapter = new PrismaPg(pool, isSupabase ? { pgBouncer: true } : undefined);
+    const adapter = new PrismaPg(pool, (isSupabase ? { pgBouncer: true } : undefined) as any);
     realPrisma = new PrismaClient({ adapter });
   } catch (e) {
     console.warn('Failed to initialize PrismaClient database connection:', e);
@@ -209,7 +209,7 @@ if (databaseUrl && databaseUrl.trim() !== '') {
 }
 
 // Wrap in a proxy that dynamically routes to real Prisma or falls back to local fs on failure
-export const prisma = new Proxy({}, {
+export const prisma: PrismaClient = new Proxy({}, {
   get(target, prop) {
     if (prop === '$transaction') {
       return async function (promises: any[]) {
@@ -276,4 +276,4 @@ export const prisma = new Proxy({}, {
     // No real database URL, use filesystem mock
     return (mockPrisma as any)[prop];
   }
-});
+}) as any;
