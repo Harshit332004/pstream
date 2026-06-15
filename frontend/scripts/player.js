@@ -755,13 +755,23 @@ window.Player = {
                     
                     queryParams.set('headers', JSON.stringify(headersJson));
                 }
-                return `${path}?${queryParams.toString()}`;
+                let finalUrl = `${path}?${queryParams.toString()}`;
+                const isTauri = !!(window.__TAURI_INTERNALS__ || window.__tauri__);
+                if (isTauri) {
+                    finalUrl = finalUrl.replace(/^https?:\/\/[^\/]+\/proxy\//, 'proxy://localhost/');
+                }
+                return finalUrl;
             } catch (e) {
                 console.error('Failed to parse query params in sanitizeStreamUrl:', e);
             }
         }
         
-        return parts.length > 1 ? `${path}?${parts.slice(1).join('?')}` : path;
+        let finalUrl = parts.length > 1 ? `${path}?${parts.slice(1).join('?')}` : path;
+        const isTauri = !!(window.__TAURI_INTERNALS__ || window.__tauri__);
+        if (isTauri) {
+            finalUrl = finalUrl.replace(/^https?:\/\/[^\/]+\/proxy\//, 'proxy://localhost/');
+        }
+        return finalUrl;
     },
     
     startLoadTimeout: () => {
