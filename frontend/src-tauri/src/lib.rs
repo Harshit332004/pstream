@@ -161,7 +161,24 @@ pub fn run() {
 
         let status_code = StatusCode::from_u16(res.status().as_u16()).unwrap_or(StatusCode::OK);
 
-        // Read body
+        // Copy safe response headers from upstream BEFORE consuming it
+        let mut headers_map = HashMap::new();
+        let headers_to_forward = [
+          "content-type",
+          "content-range",
+          "accept-ranges",
+          "cache-control",
+          "expires",
+        ];
+        for h in &headers_to_forward {
+          if let Some(val) = res.headers().get(*h) {
+            if let Ok(val_str) = val.to_str() {
+              headers_map.insert((*h).to_string(), val_str.to_string());
+            }
+          }
+        }
+
+        // Read body (this consumes res)
         let mut body_bytes = match res.bytes().await {
           Ok(b) => b.to_vec(),
           Err(_) => Vec::new(),
@@ -222,21 +239,9 @@ pub fn run() {
           .header("Access-Control-Allow-Headers", "Range, Content-Type, Authorization, X-Requested-With")
           .header("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type");
 
-        // Copy safe response headers from upstream
-        let headers_to_forward = [
-          "content-type",
-          "content-range",
-          "accept-ranges",
-          "cache-control",
-          "expires",
-        ];
-
-        for h in &headers_to_forward {
-          if let Some(val) = res.headers().get(*h) {
-            if let Ok(val_str) = val.to_str() {
-              builder = builder.header(*h, val_str);
-            }
-          }
+        // Copy forwarded headers we extracted earlier
+        for (k, v) in headers_map {
+          builder = builder.header(k, v);
         }
 
         builder = builder.header("content-length", body_bytes.len().to_string());
