@@ -97,16 +97,18 @@ pub fn run() {
 
         if let Some(h_json) = headers_str {
           let mut decoded_json = h_json.clone();
-          if decoded_json.contains("%22") || decoded_json.contains("%7B") {
+          if decoded_json.contains("%22") || decoded_json.contains("%7B") || decoded_json.contains('%') {
             if let Ok(dec) = percent_decode_str(&decoded_json).decode_utf8() {
               decoded_json = dec.into_owned();
             }
           }
-          if decoded_json.contains("%22") || decoded_json.contains("%7B") {
+          if decoded_json.contains("%22") || decoded_json.contains("%7B") || decoded_json.contains('%') {
             if let Ok(dec) = percent_decode_str(&decoded_json).decode_utf8() {
               decoded_json = dec.into_owned();
             }
           }
+          // Replace '+' with space to handle form-urlencoded spaces properly
+          decoded_json = decoded_json.replace('+', " ");
 
           if let Ok(parsed_headers) = serde_json::from_str::<HashMap<String, String>>(&decoded_json) {
             for (k, v) in parsed_headers {
