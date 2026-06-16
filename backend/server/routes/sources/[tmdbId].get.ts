@@ -1,44 +1,12 @@
-import { defineEventHandler, getRouterParam, getQuery, getRequestURL } from 'h3';
+import { defineEventHandler, getRouterParam, getQuery } from 'h3';
 import { makeProviders, makeStandardFetcher, targets } from '@p-stream/providers';
 
 /**
- * Wraps a raw CDN stream URL through our backend /proxy/ endpoint.
- *
- * Why this matters:
- *  1. Auth tokens are IP-locked — the scraper (running on Vercel) got the token
- *     for Vercel's IP. Any other IP (user's phone, desktop) will get 403.
- *  2. got-scraping impersonates Chrome's TLS fingerprint, bypassing WAF checks.
- *  3. CORS is handled server-side, so any client (browser, mobile, desktop) works.
- */
-function wrapProxy(rawUrl: string, headers: Record<string, string>, baseUrl: string): string {
-  try {
-    const parsed = new URL(rawUrl);
-    const origin = parsed.origin;          // e.g. https://vod2.ironwallnet.com:6069
-    const pathname = parsed.pathname;      // e.g. /wiwii/.../playlist.m3u8
-
-    const params = new URLSearchParams();
-    params.set('host', origin);
-
-    // Forward auth/token query params from the raw CDN URL
-    for (const [k, v] of parsed.searchParams.entries()) {
-      params.set(k, v);
-    }
-
-    // Embed headers so the proxy can spoof Referer/Origin/User-Agent upstream
-    if (headers && Object.keys(headers).length > 0) {
-      params.set('headers', JSON.stringify(headers));
-    }
-
-    return `${baseUrl}/proxy${pathname}?${params.toString()}`;
-  } catch {
-    return rawUrl; // Fallback: return as-is if URL parsing fails
-  }
-}
-
-/**
  * GET /sources/:tmdbId
- * Scrapes stream sources using @p-stream/providers and returns them
- * wrapped through this backend's /proxy/ endpoint.
+ *
+ * Scrapes stream sources using @p-stream/providers.
+ * NOTE: @p-stream/providers already returns URLs pre-proxied through this
+ * backend's /proxy/ endpoint — DO NOT wrap them again.
  */
 export default defineEventHandler(async (event) => {
   const tmdbId = getRouterParam(event, 'tmdbId');
@@ -49,11 +17,6 @@ export default defineEventHandler(async (event) => {
   if (!tmdbId) {
     return { error: 'Missing tmdbId', sources: [], subtitles: [] };
   }
-
-  // Determine this backend's base URL for building proxy URLs.
-  // BACKEND_BASE_URL env var takes priority (set this in Vercel dashboard).
-  const reqUrl = getRequestURL(event);
-  const backendBase = (process.env.BACKEND_BASE_URL || `${reqUrl.protocol}//${reqUrl.host}`).replace(/\/+$/, '');
 
   try {
     const providers = makeProviders({
@@ -87,8 +50,9 @@ export default defineEventHandler(async (event) => {
       const streamHeaders: Record<string, string> = stream.headers || {};
 
       if (stream.type === 'hls') {
+        // stream.playlist is ALREADY proxied through /proxy/ by @p-stream/providers
         sources.push({
-          url: wrapProxy(stream.playlist, streamHeaders, backendBase),
+          url: stream.playlist,
           type: 'hls',
           provider: result.sourceId || 'P-Stream',
           quality: 'Auto',
@@ -100,20 +64,19 @@ export default defineEventHandler(async (event) => {
 
         for (const q of qualityOrder) {
           if (qualities[q]) {
-            const qHeaders = qualities[q].headers || streamHeaders;
             sources.push({
-              url: wrapProxy(qualities[q].url, qHeaders, backendBase),
+              url: qualities[q].url,
               type: 'mp4',
               provider: `${result.sourceId || 'P-Stream'} (${q}p)`,
               quality: `${q}p`,
-              headers: qHeaders,
+              headers: qualities[q].headers || streamHeaders,
             });
           }
         }
 
         if (sources.length === 0 && stream.url) {
           sources.push({
-            url: wrapProxy(stream.url, streamHeaders, backendBase),
+            url: stream.url,
             type: 'mp4',
             provider: result.sourceId || 'P-Stream',
             quality: 'Auto',
