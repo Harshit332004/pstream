@@ -22,10 +22,6 @@ window.Player = {
         Player.videoElement = DOM.get('video-player');
         if (!Player.videoElement) return;
         
-        // Prevent browser from sending cookies/credentials on cross-origin stream requests
-        // This avoids triggering stricter CORS requirements on proxy servers
-        Player.videoElement.crossOrigin = 'anonymous';
-        
         // Video event listeners
         Player.videoElement.addEventListener('timeupdate', () => Player.onTimeUpdate());
         Player.videoElement.addEventListener('play', () => Player.onPlayStateChange(true));
