@@ -165,9 +165,18 @@ window.Player = {
         }
     },
     
+    // Resolve a relative backend URL (like /proxy/...) to an absolute URL using the backend origin
+    resolveBackendUrl: (relativeUrl) => {
+        if (!relativeUrl) return relativeUrl;
+        // If already absolute, return as-is
+        if (relativeUrl.startsWith('http://') || relativeUrl.startsWith('https://')) return relativeUrl;
+        const backendUrl = (import.meta.env.VITE_BACKEND_URL || window.location.origin).replace(/\/+$/, '');
+        return backendUrl + relativeUrl;
+    },
+
     loadHLSStream: (source) => {
-        const sanitizedUrl = Player.sanitizeStreamUrl(source.url);
-        console.log('Loading HLS stream (sanitized):', sanitizedUrl);
+        const sanitizedUrl = Player.resolveBackendUrl(Player.sanitizeStreamUrl(source.url));
+        console.log('Loading HLS stream (resolved):', sanitizedUrl);
         
         // Native HLS fallback for Safari/iOS or browsers without MSE support
         if (!window.Hls || !Hls.isSupported()) {
@@ -287,8 +296,8 @@ window.Player = {
     },
     
     loadDirectStream: (source) => {
-        const sanitizedUrl = Player.sanitizeStreamUrl(source.url);
-        console.log('Loading Direct stream (sanitized):', sanitizedUrl);
+        const sanitizedUrl = Player.resolveBackendUrl(Player.sanitizeStreamUrl(source.url));
+        console.log('Loading Direct stream (resolved):', sanitizedUrl);
         
         Player.videoElement.src = sanitizedUrl;
         Player.videoElement.onloadedmetadata = () => {

@@ -66,10 +66,16 @@ function wrapProxy(urlStr: string, defaultHeaders: Record<string, string>): { ur
 
     // 3. Construct our own local proxy URL
     const parsedTarget = new URL(targetUrl);
-    const localProxyUrl = new URL(`/proxy${parsedTarget.pathname}`, 'http://localhost:3000');
+    // Avoid double /proxy/ prefix — some CDN URLs (e.g., storm.vodvidl.site/proxy/wiwii/...)
+    // already have /proxy/ in the pathname
+    const targetPath = parsedTarget.pathname.startsWith('/proxy/')
+      ? parsedTarget.pathname
+      : `/proxy${parsedTarget.pathname}`;
+    const localProxyUrl = new URL(targetPath, 'http://localhost:3000');
     localProxyUrl.searchParams.set('host', parsedTarget.origin);
     if (Object.keys(targetHeaders).length > 0) {
-      localProxyUrl.searchParams.set('headers', JSON.stringify(targetHeaders));
+      // Use base64-encoded proxyHeaders (matches what the proxy route expects)
+      localProxyUrl.searchParams.set('proxyHeaders', Buffer.from(JSON.stringify(targetHeaders)).toString('base64'));
     }
     for (const [key, value] of parsedTarget.searchParams.entries()) {
       localProxyUrl.searchParams.set(key, value);
