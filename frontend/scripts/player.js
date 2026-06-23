@@ -212,10 +212,11 @@ window.Player = {
                                 if (activeSource && activeSource.url) {
                                     // Extract proxyHeaders from the sanitized source URL
                                     const sanitizedSourceUrl = Player.sanitizeStreamUrl(activeSource.url);
-                                    const sourceUrlObj = new URL(sanitizedSourceUrl, window.location.origin);
+                                    const backendUrl = (import.meta.env.VITE_BACKEND_URL || window.location.origin).replace(/\/+$/, '');
+                                    const sourceUrlObj = new URL(sanitizedSourceUrl, backendUrl);
                                     const proxyHeadersParam = sourceUrlObj.searchParams.get('proxyHeaders');
                                     
-                                    const proxyUrl = new URL(window.location.origin + '/proxy' + originalUrl.pathname);
+                                    const proxyUrl = new URL(backendUrl + '/proxy' + originalUrl.pathname);
                                     proxyUrl.searchParams.set('host', originalUrl.origin);
                                     if (proxyHeadersParam) {
                                         proxyUrl.searchParams.set('proxyHeaders', proxyHeadersParam);

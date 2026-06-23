@@ -14,7 +14,8 @@ window.Providers = {
     currentBackendIndex: 0,
 
     getSources: async (tmdbId, type, season = null, episode = null) => {
-        const url = new URL(`/sources/${tmdbId}`, window.location.origin);
+        const backendUrl = (import.meta.env.VITE_BACKEND_URL || window.location.origin).replace(/\/+$/, '');
+        const url = new URL(`/sources/${tmdbId}`, backendUrl);
         url.searchParams.set('type', type);
         if (season) url.searchParams.set('season', season);
         if (episode) url.searchParams.set('episode', episode);
@@ -35,11 +36,11 @@ window.Providers = {
         };
     },
 
-    // Get metadata for discovery
     getDiscovery: async () => {
         try {
+            const backendUrl = (import.meta.env.VITE_BACKEND_URL || window.location.origin).replace(/\/+$/, '');
             const response = await fetchWithTimeout(
-                `${window.location.origin}/discover`,
+                `${backendUrl}/discover`,
                 {},
                 10000
             );
