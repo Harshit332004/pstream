@@ -9,6 +9,14 @@ const backendPublic = path.resolve(__dirname, '../public');
 
 console.log('Building frontend...');
 try {
+  console.log('Installing frontend dependencies...');
+  execSync('npm install', {
+    cwd: frontendDir,
+    stdio: 'inherit',
+    env: { ...process.env, NODE_ENV: 'development' } // install devDependencies like vite
+  });
+
+  console.log('Running frontend build...');
   execSync('npm run build', {
     cwd: frontendDir,
     stdio: 'inherit',
