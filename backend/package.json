@@ -5,8 +5,7 @@
     "providers-lib"
   ],
   "scripts": {
-    "build:frontend": "cd ../frontend && npm ci && npm run build && rm -rf ../backend/public && cp -r dist ../backend/public",
-    "build": "npm run build:frontend && npm run build --workspace=providers-lib && npx prisma generate && nitro build",
+    "build": "node scripts/build-frontend.js && npm run build --workspace=providers-lib && npx prisma generate && nitro build",
     "dev": "nitro dev",
     "prepare": "nitro prepare",
     "preview": "node .output/server/index.mjs"

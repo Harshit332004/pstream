@@ -1,22 +1,27 @@
 import { defineEventHandler, getRouterParam, getQuery, setResponseHeaders, setResponseHeader, sendStream, getHeader, createError } from 'h3';
 import { gotScraping } from 'got-scraping';
+import { Readable } from 'stream';
 
 export default defineEventHandler(async (event) => {
-  // 1. Global CORS - NEVER fail a preflight
+  // ─── 1. Bulletproof CORS ────────────────────────────────────────────
+  // Wildcard Access-Control-Allow-Headers prevents Chrome/Safari CORS
+  // preflight failures for any custom or standard headers.
   setResponseHeaders(event, {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Range, Accept, Referer, User-Agent',
-    'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Content-Type',
+    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+    'Access-Control-Allow-Headers': '*',
+    'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Content-Type, Accept-Ranges',
     'Access-Control-Max-Age': '86400',
   });
 
+  // Immediately terminate OPTIONS preflight with 204 No Content
   if (event.node.req.method === 'OPTIONS') {
     event.node.res.statusCode = 204;
-    return '';
+    event.node.res.end();
+    return;
   }
 
-  // 2. Parse upstream URL
+  // ─── 2. Parse upstream target URL ───────────────────────────────────
   const query = getQuery(event);
   const host = query.host as string;
   if (!host) throw createError({ statusCode: 400, message: 'Missing host query parameter' });
@@ -29,59 +34,97 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'Invalid target host' });
   }
 
-  // Preserve auth/tokens in the URL
+  // Forward query params to upstream (excluding internal proxy control params)
+  const INTERNAL_PARAMS = new Set(['host', 'headers', 'proxyHeaders']);
   for (const [key, value] of Object.entries(query)) {
-    if (key !== 'host' && key !== 'headers' && value !== undefined) {
+    if (!INTERNAL_PARAMS.has(key) && value !== undefined) {
       targetUrl.searchParams.set(key, String(value));
     }
   }
 
-  // 3. Header Sanitization
+  // ─── 3. Header extraction ──────────────────────────────────────────
+  // Supports both new Base64-encoded `proxyHeaders` and legacy raw JSON `headers`.
+  // Scraping headers (User-Agent, Referer, Origin) are applied ONLY to the
+  // backend-to-CDN upstream request, never on the client-facing response.
+  const proxyHeadersB64 = query.proxyHeaders as string | undefined;
   const queryHeadersStr = query.headers as string | undefined;
+
   const upstreamHeaders: Record<string, string> = {
     'accept': '*/*',
     'accept-language': 'en-US,en;q=0.9',
   };
 
-  if (queryHeadersStr) {
+  if (proxyHeadersB64) {
+    // Preferred: Base64-encoded JSON headers (safe for URL transport)
     try {
-      let decoded = decodeURIComponent(queryHeadersStr);
-      if (decoded.includes('%22') || decoded.includes('%7B')) decoded = decodeURIComponent(decoded);
-
+      const decoded = Buffer.from(proxyHeadersB64, 'base64').toString('utf-8');
       const parsed = JSON.parse(decoded);
       for (const [k, v] of Object.entries(parsed)) {
         if (typeof v === 'string') {
-          const lowerKey = k.toLowerCase();
-          if (lowerKey === 'user-agent') upstreamHeaders['user-agent'] = v;
-          else if (lowerKey === 'referer') upstreamHeaders['referer'] = v;
-          else if (lowerKey === 'origin') upstreamHeaders['origin'] = v;
+          const lk = k.toLowerCase();
+          if (lk === 'user-agent') upstreamHeaders['user-agent'] = v;
+          else if (lk === 'referer') upstreamHeaders['referer'] = v;
+          else if (lk === 'origin') upstreamHeaders['origin'] = v;
           else upstreamHeaders[k] = v;
         }
       }
-    } catch (e) {
-      // ignore parse errors silently to prevent crashes
-    }
+    } catch (e) { /* ignore parse errors */ }
+  } else if (queryHeadersStr) {
+    // Legacy: raw JSON headers (possibly double-URL-encoded)
+    try {
+      let decoded = decodeURIComponent(queryHeadersStr);
+      if (decoded.includes('%22') || decoded.includes('%7B')) decoded = decodeURIComponent(decoded);
+      const parsed = JSON.parse(decoded);
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'string') {
+          const lk = k.toLowerCase();
+          if (lk === 'user-agent') upstreamHeaders['user-agent'] = v;
+          else if (lk === 'referer') upstreamHeaders['referer'] = v;
+          else if (lk === 'origin') upstreamHeaders['origin'] = v;
+          else upstreamHeaders[k] = v;
+        }
+      }
+    } catch (e) { /* ignore parse errors */ }
   }
 
-  // Range header is critical for video scrubbing
+  // Forward Range header from client for video scrubbing / seek support
   const rangeHeader = getHeader(event, 'range');
   if (rangeHeader) upstreamHeaders['range'] = rangeHeader;
 
+  // Compute a stable Base64 proxyHeaders value to embed in rewritten m3u8 URLs
+  let rewriteHeadersParam = '';
+  if (proxyHeadersB64) {
+    rewriteHeadersParam = proxyHeadersB64;
+  } else if (queryHeadersStr) {
+    try {
+      let decoded = decodeURIComponent(queryHeadersStr);
+      if (decoded.includes('%22') || decoded.includes('%7B')) decoded = decodeURIComponent(decoded);
+      JSON.parse(decoded); // validate
+      rewriteHeadersParam = Buffer.from(decoded).toString('base64');
+    } catch (e) {
+      try { rewriteHeadersParam = Buffer.from(queryHeadersStr).toString('base64'); } catch (_) {}
+    }
+  }
+
   const method = (event.node.req.method || 'GET') as any;
-  const isM3u8 = targetUrl.pathname.endsWith('.m3u8') || targetUrl.pathname.includes('m3u8');
+  const pathname = targetUrl.pathname.toLowerCase();
+  const isM3u8 = pathname.endsWith('.m3u8') || pathname.includes('m3u8');
 
   try {
-    // ==========================================
-    // PATH A: PLAYLIST INTERCEPTION (TEXT)
-    // ==========================================
     if (isM3u8) {
-      // Use gotScraping to bypass Cloudflare TLS fingerprinting
+      // ═══════════════════════════════════════════════════════════════
+      // PATH A: M3U8 PLAYLIST (TEXT)
+      // Uses gotScraping for Cloudflare TLS fingerprint bypass.
+      // CRITICAL FIX: Rewrites ALL URLs (segments, sub-playlists, keys,
+      // init segments) to route back through this proxy. This eliminates
+      // cross-origin CORS failures that broke Chrome/Safari/mobile.
+      // ═══════════════════════════════════════════════════════════════
       const response = await gotScraping({
         url: targetUrl.toString(),
-        method: method,
+        method,
         headers: upstreamHeaders,
         responseType: 'text',
-        throwHttpErrors: false // We will handle errors manually
+        throwHttpErrors: false,
       });
 
       if (response.statusCode >= 400) {
@@ -89,74 +132,139 @@ export default defineEventHandler(async (event) => {
         return response.body;
       }
 
-      // Rewrite chunk URLs inside the M3U8 so they route back through our proxy
+      // Helper: rewrite any URL to route through our proxy
+      const rewriteUrl = (rawUrl: string): string => {
+        const absUrl = new URL(rawUrl, targetUrl.toString());
+        const params = new URLSearchParams();
+        params.set('host', absUrl.origin);
+        if (rewriteHeadersParam) params.set('proxyHeaders', rewriteHeadersParam);
+        for (const [k, v] of absUrl.searchParams.entries()) params.set(k, v);
+        return `/proxy${absUrl.pathname}?${params.toString()}`;
+      };
+
+      // Rewrite ALL URLs in the playlist (segments, sub-playlists, keys, etc.)
       const lines = response.body.split('\n');
       const rewrittenLines = lines.map(line => {
         const trimmed = line.trim();
+
+        // Rewrite URI="..." inside HLS directives (#EXT-X-KEY, #EXT-X-MAP, etc.)
+        if (trimmed.startsWith('#') && trimmed.includes('URI="')) {
+          return trimmed.replace(/URI="([^"]+)"/g, (_match, uri) => {
+            try {
+              if (uri.startsWith('data:')) return _match; // Skip data: URIs
+              return `URI="${rewriteUrl(uri)}"`;
+            } catch (e) {
+              return _match;
+            }
+          });
+        }
+
+        // Rewrite bare segment/playlist URLs on their own line
         if (trimmed && !trimmed.startsWith('#')) {
           try {
-            const chunkUrl = new URL(trimmed, targetUrl.toString());
-            const proxyParams = new URLSearchParams();
-            proxyParams.set('host', chunkUrl.origin);
-            if (queryHeadersStr) proxyParams.set('headers', queryHeadersStr);
-            for (const [key, val] of chunkUrl.searchParams.entries()) {
-              proxyParams.set(key, val);
-            }
-            return `/proxy${chunkUrl.pathname}?${proxyParams.toString()}`;
+            return rewriteUrl(trimmed);
           } catch (e) {
             return line;
           }
         }
+
         return line;
       });
 
       const rewrittenM3u8 = rewrittenLines.join('\n');
 
-      // Pass back safe headers
-      const headersToForward = ['content-type', 'cache-control', 'expires'];
+      // Set response headers
+      const headersToForward = ['cache-control', 'expires'];
       for (const h of headersToForward) {
         if (response.headers[h]) setResponseHeader(event, h, response.headers[h] as string);
       }
+      setResponseHeader(event, 'content-type', 'application/vnd.apple.mpegurl');
       setResponseHeader(event, 'content-length', Buffer.byteLength(rewrittenM3u8));
 
       return rewrittenM3u8;
-    }
 
-    // ==========================================
-    // PATH B: VIDEO CHUNK PIPING (BINARY STREAM)
-    // ==========================================
-    else {
-      return new Promise((resolve, reject) => {
-        // Create a read stream that spoofs a real browser
-        const stream = gotScraping.stream({
-          url: targetUrl.toString(),
-          method: method,
-          headers: upstreamHeaders,
+    } else {
+      // ═══════════════════════════════════════════════════════════════
+      // PATH B: BINARY MEDIA CHUNKS (.ts, .mp4, encryption keys)
+      // Uses native Node fetch for clean HTTP Range / 206 Partial Content
+      // support required by Chrome, Safari, and mobile browsers.
+      // Falls back to gotScraping if native fetch is blocked (TLS fingerprint).
+      // ═══════════════════════════════════════════════════════════════
+      let fetchResponse: Response;
+      try {
+        fetchResponse = await fetch(targetUrl.toString(), {
+          method,
+          headers: upstreamHeaders as any,
+          redirect: 'follow',
         });
 
-        stream.on('response', (response) => {
-          const headersToForward = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control'];
-          for (const h of headersToForward) {
-            if (response.headers[h]) setResponseHeader(event, h, response.headers[h] as string);
+        // If CDN returns 403, it might be checking TLS fingerprints — fall through to gotScraping
+        if (fetchResponse.status === 403) {
+          throw new Error('403 Forbidden - possible TLS fingerprint block');
+        }
+      } catch (fetchErr: any) {
+        // Fallback: use gotScraping which spoofs browser TLS fingerprints
+        console.warn('[Proxy] Native fetch failed, falling back to gotScraping:', fetchErr.message);
+        return new Promise((resolve, reject) => {
+          const stream = gotScraping.stream({
+            url: targetUrl.toString(),
+            method,
+            headers: upstreamHeaders,
+          });
+          stream.on('response', (gsResponse) => {
+            const hf = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control'];
+            for (const h of hf) {
+              if (gsResponse.headers[h]) setResponseHeader(event, h, gsResponse.headers[h] as string);
+            }
+            event.node.res.statusCode = gsResponse.statusCode || 200;
+            resolve(sendStream(event, stream));
+          });
+          stream.on('error', (error: any) => {
+            console.error('[Proxy] gotScraping fallback stream error:', error.message);
+            reject(createError({ statusCode: 502, message: 'Chunk stream failed' }));
+          });
+        });
+      }
+
+      // Forward upstream HTTP status (200 OK or 206 Partial Content)
+      event.node.res.statusCode = fetchResponse.status;
+
+      // Forward critical streaming headers for proper browser media handling
+      const headersToForward = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control', 'etag'];
+      for (const h of headersToForward) {
+        const val = fetchResponse.headers.get(h);
+        if (val) setResponseHeader(event, h, val);
+      }
+
+      if (!fetchResponse.body) {
+        return '';
+      }
+
+      // Convert Web ReadableStream to Node Readable for h3's sendStream
+      const reader = fetchResponse.body.getReader();
+      const nodeStream = new Readable({
+        async read() {
+          try {
+            const { done, value } = await reader.read();
+            if (done) {
+              this.push(null);
+            } else {
+              this.push(Buffer.from(value));
+            }
+          } catch (err) {
+            this.destroy(err as Error);
           }
-          event.node.res.statusCode = response.statusCode || 200;
-
-          // Pipe the secure stream directly to the client
-          resolve(sendStream(event, stream));
-        });
-
-        stream.on('error', (error: any) => {
-          console.error("Chunk stream error:", error.message);
-          reject(createError({ statusCode: 502, message: 'Chunk stream failed' }));
-        });
+        },
       });
+
+      return sendStream(event, nodeStream);
     }
 
   } catch (error: any) {
-    console.error('GotScraping Fatal Error:', error.message);
+    console.error('[Proxy] Fatal Error:', error.message);
     throw createError({
       statusCode: 502,
-      message: 'Proxy failed to bypass upstream security',
+      message: 'Proxy failed to fetch upstream resource',
     });
   }
 });

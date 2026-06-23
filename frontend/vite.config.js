@@ -7,36 +7,17 @@ export default defineConfig(({ mode }) => ({
     // In dev, proxy /proxy/* and /sources/* to the local backend
     // so the frontend and API are same-origin even during development
     proxy: {
-      '/proxy': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-        rewrite: (path) => path,
-      },
-      '/sources': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-        rewrite: (path) => path,
-      },
-      '/discover': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-        rewrite: (path) => path,
-      },
-      '/meta': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-        rewrite: (path) => path,
-      },
-      '/auth': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-        rewrite: (path) => path,
-      },
-      '/users': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-        rewrite: (path) => path,
-      },
+      '/proxy': 'http://localhost:3000',
+      '/sources': 'http://localhost:3000',
+      '/discover': 'http://localhost:3000',
+      '/meta': 'http://localhost:3000',
+      '/auth': 'http://localhost:3000',
+      '/users': 'http://localhost:3000',
+      '/sessions': 'http://localhost:3000',
+      '/letterboxd': 'http://localhost:3000',
+      '/lists': 'http://localhost:3000',
+      '/metrics': 'http://localhost:3000',
+      '/healthcheck': 'http://localhost:3000',
     },
   },
   build: {

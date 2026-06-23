@@ -97,6 +97,7 @@ window.Player = {
             );
             
             if (!result.sources || result.sources.length === 0) {
+                console.error(`[Player Error Log] Source lookup failed for TMDB ID: ${media.tmdbId}, Type: ${media.type}, Error: ${result.error || 'No sources found'}`);
                 showToast('❌ No sources found', 'error');
                 Player.close();
                 return;
@@ -165,15 +166,32 @@ window.Player = {
     },
     
     loadHLSStream: (source) => {
-        if (!window.Hls) {
-            showToast('HLS.js not available', 'error');
-            return;
-        }
-        
         const sanitizedUrl = Player.sanitizeStreamUrl(source.url);
         console.log('Loading HLS stream (sanitized):', sanitizedUrl);
         
-        // Custom loader to sanitize and decode URLs for all HLS requests
+        // Native HLS fallback for Safari/iOS or browsers without MSE support
+        if (!window.Hls || !Hls.isSupported()) {
+            if (Player.videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+                console.log('[Player] Using native HLS playback (no MSE support)');
+                Player.videoElement.src = sanitizedUrl;
+                const onNativeMeta = () => {
+                    Player.clearLoadTimeout();
+                    Player.showLoader(false);
+                    Player.updateQualityMenu();
+                    if (Player.currentMedia && Player.currentMedia.timestamp) {
+                        Player.videoElement.currentTime = Player.currentMedia.timestamp;
+                    }
+                    Player.videoElement.play().catch(() => console.warn('Autoplay prevented'));
+                    Player.videoElement.removeEventListener('loadedmetadata', onNativeMeta);
+                };
+                Player.videoElement.addEventListener('loadedmetadata', onNativeMeta);
+                return;
+            }
+            showToast('HLS.js not available and no native HLS support', 'error');
+            return;
+        }
+        
+        // Custom loader to sanitize, decode URLs, and handle proxy fallback for HLS requests
         class CustomLoader extends Hls.DefaultConfig.loader {
             constructor(config) {
                 super(config);
@@ -182,6 +200,43 @@ window.Player = {
                     if (context && context.url) {
                         context.url = Player.sanitizeStreamUrl(context.url);
                     }
+                    
+                    const originalOnError = callbacks.onError;
+                    callbacks.onError = (error, contextData, networkDetails) => {
+                        const isDirectCDN = contextData && contextData.url && !contextData.url.includes('/proxy');
+                        if (isDirectCDN) {
+                            console.warn(`[Player Fallback] Direct fetch failed for ${contextData.url}. Retrying through proxy...`);
+                            try {
+                                const originalUrl = new URL(contextData.url);
+                                const activeSource = Player.currentSources[Player.currentSourceIndex];
+                                if (activeSource && activeSource.url) {
+                                    // Extract proxyHeaders from the sanitized source URL
+                                    const sanitizedSourceUrl = Player.sanitizeStreamUrl(activeSource.url);
+                                    const sourceUrlObj = new URL(sanitizedSourceUrl, window.location.origin);
+                                    const proxyHeadersParam = sourceUrlObj.searchParams.get('proxyHeaders');
+                                    
+                                    const proxyUrl = new URL(window.location.origin + '/proxy' + originalUrl.pathname);
+                                    proxyUrl.searchParams.set('host', originalUrl.origin);
+                                    if (proxyHeadersParam) {
+                                        proxyUrl.searchParams.set('proxyHeaders', proxyHeadersParam);
+                                    }
+                                    // Preserve existing query params on the chunk/key
+                                    for (const [key, val] of originalUrl.searchParams.entries()) {
+                                        proxyUrl.searchParams.set(key, val);
+                                    }
+                                    
+                                    contextData.url = proxyUrl.toString();
+                                    console.log(`[Player Fallback] Retrying load via proxy: ${contextData.url}`);
+                                    originalLoad(contextData, loaderConfig, callbacks);
+                                    return;
+                                }
+                            } catch (e) {
+                                console.error('[Player Fallback] Failed to construct proxy URL for fallback retry:', e);
+                            }
+                        }
+                        originalOnError(error, contextData, networkDetails);
+                    };
+                    
                     originalLoad(context, loaderConfig, callbacks);
                 };
             }
@@ -200,6 +255,7 @@ window.Player = {
             maxMaxBufferLength: 30,
             pLoader: CustomLoader,
             fLoader: CustomLoader,
+            keyLoader: CustomLoader,
         });
         
         Player.hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -218,9 +274,10 @@ window.Player = {
         });
         
         Player.hls.on(Hls.Events.ERROR, (event, data) => {
-            console.error('HLS Error:', data);
+            const failingUrl = data.url || (data.frag && data.frag.url) || (data.networkDetails && data.networkDetails.url) || 'unknown URL';
+            console.error(`[Player Error Log] Event: ${event}, Type: ${data.type}, Detail: ${data.details}, URL: ${failingUrl}, Fatal: ${data.fatal}`);
             if (data.fatal) {
-                Player.handlePlaybackError(new Error(`HLS Fatal Error: ${data.details || data.type}`));
+                Player.handlePlaybackError(new Error(`HLS Fatal Error: [${data.details || data.type}] at ${failingUrl}`));
             }
         });
         
@@ -741,15 +798,16 @@ window.Player = {
                     if (headersStr.includes('%22') || headersStr.includes('%7B')) {
                         decodedHeaders = decodeURIComponent(headersStr);
                     }
-                    // Validate that headers are valid JSON, re-serialize cleanly
                     const headersJson = JSON.parse(decodedHeaders);
                     
-                    // Inject the exact User-Agent used by the scraper to ensure proxy validation passes
+                    // Inject the exact User-Agent used by the scraper
                     const scraperUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
                     headersJson['User-Agent'] = scraperUA;
                     headersJson['user-agent'] = scraperUA;
                     
-                    queryParams.set('headers', JSON.stringify(headersJson));
+                    // Encode as Base64 for safe, cross-browser URL transport
+                    queryParams.set('proxyHeaders', btoa(JSON.stringify(headersJson)));
+                    queryParams.delete('headers');
                 }
                 return `${path}?${queryParams.toString()}`;
             } catch (e) {

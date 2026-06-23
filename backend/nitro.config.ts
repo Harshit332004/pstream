@@ -6,6 +6,7 @@ export default defineNitroConfig({
   preset: process.env.VERCEL ? 'vercel' : undefined,
   srcDir: 'server',
   compatibilityDate: '2025-03-05',
+
   experimental: {
     asyncContext: true,
     tasks: true,

@@ -1,6 +1,6 @@
 # 🎬 SafeStream V2 — Complete Project Overview & Architecture
 
-SafeStream V2 is a lightweight, low-end optimized, self-hosted movie and TV show streaming application. It consists of a high-performance backend server built with **Nitro** (a server engine powered by UnJS) and a vanilla, modern **Vite/HTML5/JavaScript/CSS** frontend player client that features cross-device synchronization and automatic backup fallback.
+SafeStream V2 is a high-performance, low-end optimized, self-hosted movie and TV show streaming ecosystem. It integrates a server-side scraping engine, a secure bypass proxy, user synchronization, real-time telemetry, and a multi-platform client frontend that can be deployed as an SPA web app or built as a native desktop application using **Tauri**.
 
 ---
 
@@ -8,7 +8,7 @@ SafeStream V2 is a lightweight, low-end optimized, self-hosted movie and TV show
 
 ```mermaid
 flowchart TD
-    subgraph Frontend [Vite Client-Side User Interface]
+    subgraph Client [Client UI Layer: Web App & Tauri Desktop]
         MainJS[main.js: UI Coordinator]
         PlayerJS[player.js: Custom HLS Player]
         SyncEngine[sync.js: Heartbeat & BroadcastChannel Sync]
@@ -17,245 +17,291 @@ flowchart TD
     end
 
     subgraph Backend [Nitro Server Engine]
+        SPARouter[[[...all].ts: SPA Fallback Router]]
         API_Routes[Server Routes & Middlewares]
-        PrismaProxy[prisma.ts: Prisma PostgreSQL Client]
-        LocalJSON[Local JSON File DB Fallback: .data/db/*.json]
+        ProxyEngine[[proxy/[...all].ts: Stream Bypass Proxy]]
+        PrismaProxy[prisma.ts: Dynamic Database Proxy Client]
+        LocalJSON[Local JSON DB: .data/db/*.json]
         ScrapingEngine[providers-lib: Scraping Package]
+        MetricsEngine[metrics.ts: prom-client Telemetry Manager]
+        CronTasks[Nitro Scheduled Tasks: Daily/Weekly/Monthly Cron]
     end
 
-    subgraph External_APIs [Third-Party APIs]
+    subgraph External_APIs [Third-Party APIs & Media CDN]
         TMDB[TheMovieDB API: Metadata & Search]
         Trakt[Trakt.tv API: Trending & Lists]
         VidLink[VidLink API & Scrapers]
         OtherScrapers[45+ Scraping Providers & 30+ Embeds]
+        VideoHost[Video Hosts / CDN Segments]
     end
 
-    %% Frontend interactions
+    %% Client interactions
     MainJS -->|Searches & Details| TMDB
     MainJS -->|Initiates Playback| PlayerJS
     PlayerJS -->|Requests Sources| ProvidersJS
     ProvidersJS -->|GET /sources/:tmdbId| API_Routes
     SyncEngine -->|PUT /watch-history| API_Routes
-    SyncEngine -->|BroadcastChannel| OtherTabs[Other Browser Tabs]
+    SyncEngine -->|BroadcastChannel| OtherTabs[Other Browser Tabs / Windows]
     StorageJS <-->|Cache / Read| LocalStorage[(Browser LocalStorage)]
 
+    %% Desktop App Integration
+    Client <-->|Tauri API / Rust WebView| TauriBackend[Tauri Desktop Core]
+
     %% Backend interactions
+    SPARouter -->|Serves SPA| Client
     API_Routes -->|Scrape Sources| ScrapingEngine
     API_Routes -->|Discover / Trending| TMDB
     API_Routes -->|Trending Lists| Trakt
+    API_Routes -->|Record Events| MetricsEngine
+    CronTasks -->|Reset Intervals| MetricsEngine
     ScrapingEngine -->|Decrypt & Scrape| VidLink
     ScrapingEngine -->|Scrape streams/embeds| OtherScrapers
+    ProxyEngine -->|Fetch & Segment Rewriting| VideoHost
+    PlayerJS -->|Request Streams| ProxyEngine
+    
     PrismaProxy <-->|Query / Write| PostgreSQL[(PostgreSQL Database)]
-    PrismaProxy -.->|Database Down Fallback| LocalJSON
-    API_Routes -->|Read/Write Session/History| PrismaProxy
+    PrismaProxy -.->|Database Offline Fallback| LocalJSON
+    API_Routes -->|Read/Write Session/History/Settings| PrismaProxy
 ```
 
 ---
 
-## 📂 Complete File Structure
+## 📂 Monorepo File Structure & Layout
 
-Below is the directory tree of the workspace, detailing the exact role of every major directory and file.
+The project is structured as a monorepo containing the standalone backend API server, the browser frontend client, and the cross-platform Tauri packaging configuration.
 
 ```text
 psytream/
-├── project_overview.md          # This architectural overview document [NEW]
+├── project_overview.md          # Complete architectural overview & developer guide [UPDATED]
 ├── pstream steps.md             # Guide log detailing deployment and integration workflows
-├── sfaestream.md                # Original implementation blueprints and styling structures
-├── image.png                    # Interface capture / system asset
+├── sfaestream.md                # Original blueprints and UI design specifications
+├── image.png                    # Interface capture asset
 │
-├── frontend/                    # Vite-based static client application
-│   ├── .env                     # Production/local env variables (VITE_BACKEND_URL)
+├── frontend/                    # Vite client application & Tauri desktop structure
+│   ├── .env                     # Client environment configuration (VITE_BACKEND_URL)
 │   ├── .env.example             # Template for client environment settings
-│   ├── index.html               # Main entry HTML file (loads HLS.js, styles, and scripts)
-│   ├── package.json             # Frontend package configuration (Vite bundler setup)
-│   ├── package-lock.json        # Locked frontend dependency versions
-│   ├── vite.config.js           # Vite server and routing specifications
+│   ├── index.html               # Main entry HTML5 container (loads HLS.js, styles, and scripts)
+│   ├── package.json             # Frontend package definitions (Vite & Tauri dependencies)
+│   ├── vite.config.js           # Vite bundler, proxy definitions, and production config
 │   │
-│   ├── scripts/                 # Core client JavaScript modules
-│   │   ├── main.js              # Entry coordinator: UI event handlers, TV episode selectors
-│   │   ├── player.js            # Video player: custom controls, custom subtitles parser, fallback systems
-│   │   ├── providers.js         # API interface to retrieve sources and discovery items from backend
-│   │   ├── storage.js           # LocalStorage client-side manager with TTL caching
-│   │   ├── sync.js              # History sync heartbeat engine and BroadcastChannel tab manager
-│   │   └── utils.js             # Basic utilities: debouncers, time-formatters, TMDB endpoints
+│   ├── scripts/                 # Core client-side modules
+│   │   ├── main.js              # UI Coordinator: search debounce, TV episode selectors, layout handlers
+│   │   ├── player.js            # Custom HTML5/HLS Player: event binds, custom overlays, subtitle parser
+│   │   ├── providers.js         # API gateway communicating with backend source/meta routes
+│   │   ├── storage.js           # TTL-based LocalStorage caching wrapper
+│   │   ├── sync.js              # watch-history sync loop & BroadcastChannel browser-tab synchronization
+│   │   └── utils.js             # Utility functions: helpers, toast notifications, TMDB endpoints
 │   │
-│   └── styles/                  # Clean vanilla CSS design system
-│       ├── globals.css          # Design variables, typography, reset rules, animations
-│       ├── mobile.css           # Touch targeting and layouts for screens < 768px
-│       └── player.css           # Player overlay styles, custom control bars, and settings panel
+│   ├── styles/                  # Clean vanilla CSS design system
+│   │   ├── globals.css          # Design variables, typography, reset rules, animations
+│   │   ├── mobile.css           # Responsive mobile styles targeting viewport width < 768px
+│   │   └── player.css           # Video player overlay styles, custom control bars, and options panel
+│   │
+│   └── src-tauri/               # Tauri desktop configuration & source files
+│       ├── Cargo.toml           # Rust package configuration for the Tauri compiler
+│       ├── tauri.conf.json      # Desktop application setup (window size, resizability, bundling target)
+│       ├── src/                 # Rust code handling window creation and system APIs
+│       └── capabilities/        # Tauri permission profiles for the web view
 │
-└── backend/                     # Standalone Nitro API backend server
-    ├── Dockerfile               # Multi-stage Docker deployment setup
-    ├── docker-compose.yml       # Docker container orchestration configurations
-    ├── package.json             # Server metadata and package dependencies
-    ├── package-lock.json        # Locked server dependency versions
-    ├── nitro.config.ts          # Nitro pack settings, daily jobs configuration, and public keys
+└── backend/                     # Nitro backend server
+    ├── Dockerfile               # Multi-stage production container build instructions
+    ├── docker-compose.yml       # Local database & service orchestration template
+    ├── package.json             # Backend server configuration & script triggers
+    ├── nitro.config.ts          # Nitro server engine setup (routing, config injection, cron tasks)
     ├── tsconfig.json            # TypeScript compile configurations
-    ├── nixpacks.toml            # Nixpacks build specifications (for cloud deployment platforms)
+    ├── nixpacks.toml            # Nixpacks container specification (for cloud deployments)
     ├── railpack.json            # Railpack configurations (for Railway deployments)
     │
-    ├── prisma/                  # Relational Database Mapping
-    │   ├── schema.prisma        # Prisma database schema specifying tables and indexes
-    │   └── migrations/          # SQLite/PostgreSQL schema migration history files
+    ├── prisma/                  # Database schema definitions & migrations
+    │   ├── schema.prisma        # Database entity schemas and model definitions
+    │   └── migrations/          # SQLite/PostgreSQL schema migration files
     │
-    ├── providers-lib/           # Dynamic Video Scraper & Provider Sub-Workspace
+    ├── scripts/
+    │   └── build-frontend.js    # Build orchestrator script (builds frontend and copies it to backend public)
+    │
+    ├── providers-lib/           # Dynamic Video Scraper Sub-workspace
     │   ├── package.json         # Scraper module settings
     │   ├── tsconfig.json        # Scraper compilation configuration
-    │   ├── vite.config.ts       # Provider compilation and bundle rules
+    │   ├── vite.config.ts       # Scraper bundler configuration
     │   └── src/                 # Scraper source files
-    │       ├── index.ts         # Library entrypoint exposing standard providers
-    │       ├── providers/       # Scraper definitions
-    │       │   ├── all.ts       # Registry of all 45+ sources and 30+ embeds
-    │       │   ├── base.ts      # Base abstract types for Embeds and Sourcerers
-    │       │   ├── captions.ts  # Caption utility functions
-    │       │   ├── get.ts       # Scraper resolution handlers
-    │       │   ├── streams.ts   # Stream type declarations
-    │       │   ├── embeds/      # 30+ Direct video host extractors (Upcloud, Vidhide, Filemoon, Dood)
-    │       │   └── sources/     # 45+ Index site search scrapers (VidLink, Autoembed, Zoechip, HDRezka)
-    │       ├── fetchers/        # Proxy and browser user-agent network adapters
-    │       ├── runners/         # Run routines executing scrapes with custom context
-    │       └── utils/           # Error classes, text decrypters, and context specifications
+    │       ├── index.ts         # Scraper API library entrypoint
+    │       ├── fetchers/        # Custom standard and proxy network fetchers
+    │       ├── runners/         # Run controllers managing scraping contexts
+    │       ├── utils/           # Decrypters, errors, and m3u8 proxy configuration utils
+    │       └── providers/       # Scraper definitions
+    │           ├── all.ts       # Central register of all 45+ sources and 30+ embeds
+    │           ├── base.ts      # Base abstract types for Sourcerers and Embeds
+    │           ├── captions.ts  # Telemetry captions/subtitles formatters
+    │           ├── streams.ts   # HLS & MP4 stream configurations
+    │           ├── embeds/      # 30+ Direct video host extractors (Filemoon, Voe, Upcloud, Turbovid)
+    │           └── sources/     # 45+ Source index site search scrapers (VidLink, Zoechip, HDRezka)
     │
     └── server/                  # Nitro Backend Application Code
-        ├── middleware/          # Server middlewares
-        │   ├── cors.ts          # Access control permissions (CORS headers)
-        │   └── metrics.ts       # Route latency measurement handlers
-        ├── plugins/             # Nitro server setup hooks
-        │   └── metrics.ts       # Injects runtime system tracking hooks
-        ├── utils/               # Common helper functions
-        │   ├── auth.ts          # JWT session management, public-key verification bypasses
-        │   ├── challenge.ts     # Mnemonic signing verification (nacl signature checks)
-        │   ├── config.ts        # Exports application configurations and system variables
-        │   ├── logger.ts        # Custom server console logging utility
-        │   ├── metrics.ts       # System prometheus metrics collectors
-        │   ├── nickname.ts      # User registration random nickname generator
-        │   ├── playerStatus.ts  # Player health metrics utilities
-        │   ├── prisma.ts        # Prisma DB client setup with file fallback proxies [CRITICAL]
+        ├── middleware/          # Global Request Handlers
+        │   ├── cors.ts          # Access-Control CORS header injections
+        │   └── metrics.ts       # HTTP response latency tracking middleware
+        ├── plugins/             # Nitro Server Hooks
+        │   └── metrics.ts       # Registers metrics engine on application bootstrap
+        ├── tasks/               # Experimental Nitro Tasks
+        │   └── jobs/            # Scheduled Cron Tasks
+        │       └── clear-metrics/# Scripts to reset daily, weekly, monthly telemetry
+        ├── utils/               # Common Helper Functions
+        │   ├── auth.ts          # JWT session verification & mnemonic public key decryption
+        │   ├── challenge.ts     # Cryptographic signature validation (tweetnacl nacl signature checks)
+        │   ├── config.ts        # Exports application configuration variables
+        │   ├── logger.ts        # Scoped console logging utility
+        │   ├── metrics.ts       # prom-client metrics collector with disk snapshot persistency
+        │   ├── nickname.ts      # Account profile random nickname generator
+        │   ├── playerStatus.ts  # Formatter tools for checking source response metrics
+        │   ├── prisma.ts        # Relational Database proxy Client [CRITICAL SYSTEM]
         │   └── trakt.ts         # Integrations setup for Trakt API endpoints
-        └── routes/              # HTTP Rest Endpoints
-            ├── index.ts         # Root path checking route (returns API version)
+        └── routes/              # HTTP API Endpoints
+            ├── [...all].ts      # Single Page Application SPA fallback router
             ├── healthcheck.ts   # System uptime status path
-            ├── meta.ts          # Public settings metadata: name, captcha requirements
+            ├── meta.ts          # Public settings configuration endpoint
             ├── discover/        # Media trends discovery
-            │   └── index.ts     # Fetches trending, genre-sorted, top-rated lists via TMDB/Trakt
-            ├── sources/         # Video source scrapers
-            │   └── [tmdbId].get.ts # Endpoint querying providers-lib server-side
+            │   └── index.ts     # Fetches trending lists from TMDB/Trakt
+            ├── sources/         # Video scraper endpoint
+            │   └── [tmdbId].get.ts # Queries providers-lib scraper library
+            ├── proxy/           # Stream bypass proxy route
+            │   └── [...all].ts  # Proxies playlists and binary chunks, rewriting m3u8 playlists
             ├── auth/            # Mnemonic Cryptographic Auth Flow
-            │   ├── derive-public-key.post.ts # Generates public credentials from seed key
-            │   ├── login/       # Login challenger
-            │   │   ├── start/   # Issues login signature challenge code
-            │   │   └── complete/# Validates signed challenge, sets session
-            │   └── register/    # Registration challenger
+            │   ├── derive-public-key.post.ts # Generates credentials from a private mnemonic seed
+            │   ├── login/
+            │   │   ├── start/   # Generates signable login challenge code
+            │   │   └── complete/# Verifies signed challenge and sets JWT session cookie
+            │   └── register/
             │       ├── start.ts # Initiates registration flow challenge
-            │       └── complete.ts # Registers public key, creates new account profile
+            │       └── complete.ts # Stores user credentials and profile
+            ├── metrics/         # Prometheus scrape routes
+            │   ├── index.get.ts # Exposes default (all-time) telemetry
+            │   ├── daily.ts     # Exposes daily telemetry
+            │   ├── weekly.ts    # Exposes weekly telemetry
+            │   ├── monthly.ts   # Exposes monthly telemetry
+            │   ├── captcha.post.ts # Records captcha telemetry
+            │   └── providers.post.ts # Endpoint mapping scraper successes and failures
             └── users/           # User configuration & watch history routes
-                ├── @me.ts       # Retreives logged-in user profile attributes
-                └── [id]/        # Individual user operations
-                    ├── bookmarks.ts # Add, delete, and group media bookmarks
-                    ├── group-order.ts # User-defined layout orders for homepage
-                    ├── index.ts # Retrieve full profile variables
-                    ├── ratings.ts # User movie & show star ratings
-                    ├── sessions.ts # Active user devices and active sessions
-                    ├── settings.ts # Theme, audio, and scraper provider priority list options
-                    └── watch-history/ # Synced playback progress routes
-                        ├── index.ts # GET and DELETE user's entire progress history array
-                        └── [tmdbid]/ # PUT update / DELETE single progress item
+                ├── @me.ts       # Retrieves authenticated user details
+                └── [id]/        # User specific directories
+                    ├── bookmarks.ts # Bookmarks CRUD handler
+                    ├── group-order.ts # User-defined category orders
+                    ├── ratings.ts   # Media star-ratings collector
+                    ├── sessions.ts  # Authentication sessions audit
+                    ├── settings.ts  # Configures themes, languages, and scraper overrides
+                    └── watch-history/ # Playback progress syncing routes
+                        ├── index.ts # Fetches user watch history array
+                        └── [tmdbid]/ # Retrieves or updates watch progress details
 ```
 
 ---
 
 ## 💾 Database Layer & Schema
 
-The database model is defined in [schema.prisma](file:///c:/Users/lavin/psytream/backend/prisma/schema.prisma) using **PostgreSQL** notation.
+The database schema is defined in [schema.prisma](file:///c:/Users/lavin/psytream/backend/prisma/schema.prisma) mapping entities primarily to **PostgreSQL**.
 
-### Major Models & Their Roles
-1. **`users`**: Represents account credentials. Instead of passwords, users are tracked by a `public_key` (crypto signature validation) and a namespace. Nicknames are randomized on account creation.
-2. **`watch_history`**: Tracks watched duration, total duration, episode details, update timestamps, and completion states (`completed` is true when >90% watched).
-3. **`progress_items`**: Secondary lightweight mapping tracking user media playback position.
-4. **`bookmarks`**: User saved movies and series, categorizable into custom folders (`group`).
-5. **`user_settings`**: Highly detailed configuration object storing preferred subtitle languages, custom themes, autoplay selections, disabled scraping sources, and customized provider rank order override lists.
-6. **`sessions`**: Active authentication sessions linking a user to a specific browser `device` and `user_agent`.
-7. **`challenge_codes`**: Temporary records holding cryptographically unique values (UUID) issued to clients to sign during the login/registration workflow. Expires after 10 minutes.
+### Entity Schema Maps
+*   **`users`**: User account registry. Utilizes Ed25519 cryptography where accounts are identified by their `public_key` and a unique `namespace`. Profile information (avatar, display names) is stored dynamically as a `Json` structure.
+*   **`user_settings`**: High-granularity client preference model. Tracks theme options (`application_theme`, `custom_theme`), defaults (`default_subtitle_language`, `enable_autoplay`, `enable_skip_credits`), proxies, and scraper-specific override arrays (`disabled_sources`, `disabled_embeds`, `source_order`, `embed_order`).
+*   **`watch_history`**: Holds granular playback metrics. Stores watched/duration values as floats, tracking episode coordinates for TV shows. A media item is marked `completed` once the user has watched past **90%** of the duration.
+*   **`progress_items`**: Secondary layout tracking table storing media playback status.
+*   **`bookmarks`**: User bookmarked media (movies and shows), support folder tags (`group`) and tracking of individual `favorite_episodes`.
+*   **`sessions`**: Active login audit tracking user device identifiers (`device`) and client HTTP user-agents (`user_agent`).
+*   **`challenge_codes`**: Cryptographically secure temporary UUIDs generated to validate client-side signatures during auth challenge handshakes. Contains an `expires_at` field enforcing a **10-minute** time-to-live.
 
 ### 🛡️ The Double-Layer DB Fallback Proxy System
-A standout feature of SafeStream's backend is the implementation in [prisma.ts](file:///c:/Users/lavin/psytream/backend/server/utils/prisma.ts). The server wraps the Prisma client inside a JavaScript `Proxy`:
+The backend utilizes a dynamic proxy pattern implemented in [prisma.ts](file:///c:/Users/lavin/psytream/backend/server/utils/prisma.ts) that guarantees high availability even under database downtime:
 
-- **Case A (Database Configured & Online)**: If `DATABASE_URL` is provided, it connects to PostgreSQL.
-- **Case B (PostgreSQL Disconnect / Crash)**: If any operation fails with connection codes (e.g. `P1001`, `ECONNREFUSED`), the proxy interceptor automatically catches the exception, outputs a warning, and falls back to a **local filesystem database** stored as JSON files under the `.data/db/` directory (e.g., `watch_history.json`, `users.json`).
-- **Case C (No DB Configured)**: If no database URL is detected, the server operates entirely serverless-style on the local filesystem.
+```mermaid
+flowchart TD
+    Request([Database Write/Read Request]) --> Proxy{Prisma JS Proxy}
+    Proxy -->|Has DATABASE_URL & Online| DB_Query[Query PostgreSQL Database]
+    Proxy -->|Database Offline / Connection Failure| DB_Fallback[Intercept Error Code P1001 / ECONNREFUSED]
+    Proxy -->|No DATABASE_URL Configured| DB_Fallback
+    DB_Fallback --> FileDB[Perform CRUD on Local JSON Files under .data/db/*.json]
+```
 
----
-
-## 🔌 Scraping Engine (`providers-lib`)
-
-The scraper sub-workspace (`backend/providers-lib`) is a heavily customized variant of the standard client-side scraping framework. SafeStream runs this engine **server-side** to bypass client-side CORS issues, allowing low-end client devices to receive clean direct streams.
-
-### Architecture: Sourcerers vs. Embeds
-- **Sourcerers (Sources)**: Scrapers that search specific movie directories/websites (like `Zoechip`, `Autoembed`, `HDRezka`, `VidLink`) for a given TMDB ID. They return either a direct HLS/MP4 stream or a set of redirects to **Embeds**.
-- **Embeds**: Scrapers that resolve third-party video host links (like `Filemoon`, `Upcloud`, `DoodStream`, `Voe`) by unpacking obfuscated scripts (such as packer/Dean Edwards encoding, AES keys) to find the raw `.m3u8` or `.mp4` video files.
-
-### 🚀 Example: The VidLink Scraper flow ([vidlink.ts](file:///c:/Users/lavin/psytream/backend/providers-lib/src/providers/sources/vidlink.ts))
-1. **TMDB Encryption**: Receives the TMDB ID from the scrape context, makes an API call to `https://enc-dec.app/api/enc-vidlink` to fetch the encrypted version of the TMDB ID (protecting VidLink's API key).
-2. **API Query**: Queries VidLink's API (`https://vidlink.pro/api/b/movie/${encryptedId}` or `/tv/...` for TV episodes).
-3. **Data Extract**: Parses the stream playlist URL (`.m3u8`), subtitle language tracks (parsing them into standard VTT/SRT objects), and stream headers (like custom Referer credentials required to fetch chunks without HTTP 403 errors).
-4. **Output**: Passes HLS stream playlist and metadata to the main backend event handler.
+1.  **Proxied Queries**: All database queries are intercepted by a JS `Proxy` wrapper.
+2.  **Fallback Trigger**: If a database query fails with PostgreSQL connection errors (e.g. `P1001` target database unreachable, `ECONNREFUSED` connection refused), the proxy catches the exception, outputs a warning in the server logs, and redirects the operation to the fallback engine.
+3.  **JSON Database Engine**: The fallback engine performs standard CRUD operations (simulating `findMany`, `findUnique`, `create`, `update`, `upsert`, `delete`, and `$transaction`) directly using read/write filesystem transactions against `.data/db/[model_name].json` file logs.
 
 ---
 
-## 🖥️ Frontend Architecture (`frontend/`)
+## ⚡ Stream Proxy Engine (`backend/server/routes/proxy/[...all].ts`)
 
-The frontend is an optimized SPA built with vanilla JavaScript. It uses HLS.js for stream rendering.
+To bypass client-side CORS issues and browser limitations while maintaining maximum privacy, the backend exposes a robust binary and text streaming proxy.
 
-### 📜 JavaScript Core Modules
-
-#### 1. [main.js](file:///c:/Users/lavin/psytream/frontend/scripts/main.js)
-- Runs initial setup commands for systems on DOM Load (`Player.init()`, `SyncEngine.init()`).
-- Sets up search listeners (debouncing inputs by 500ms to save API quotas) and calls TMDB.
-- Handles the TV show selector: dynamically downloads details, constructs season lists, pulls season episode lists, and displays option lists.
-- Triggers the rendering of local watch history cards.
-
-#### 2. [player.js](file:///c:/Users/lavin/psytream/frontend/scripts/player.js)
-- **HLS.js Hooking**: Connects video tags to HLS.js. Registers a custom loader that intercepts playlist fetches, injecting backend proxy headers and the scraping agent's user-agent.
-- **Custom Controls Overlay**: Disables default browser video controls and styles custom progress bars, mute/volume sliders, overlay play buttons, and settings gear panels.
-- **Automatic Fallback Switching**: If a stream fails to fetch (or takes more than 15s to load), it catches the exception and immediately switches to the next available provider source from the scraper results.
-- **Keyboard Binds**: Map spacebar to play/pause, arrows left/right to skip 10s, arrows up/down to control volume, `F` for fullscreen, `M` to mute, and `ESC` to exit player.
-- **Subtitles Engine**: Downloads captions, parses standard SRT/VTT structures (line-by-line using timestamp ranges), and overlays the text in real-time onto the video player wrapper.
-
-#### 3. [sync.js](file:///c:/Users/lavin/psytream/frontend/scripts/sync.js)
-- **Synchronization**: Runs a recurring 10-second sync loop with the backend.
-- **Bypassed Authorization**: Configured to sync with standard route parameters using a universal target client identifier (`global_user`), allowing multiple browsers/devices on a local network to share watch history effortlessly.
-- **Tab Syncing (BroadcastChannel)**: Sets up a BroadcastChannel (`safestream_sync`). When progress changes in one tab, it broadcasts `HISTORY_UPDATED` to other tabs, syncing progress instantly across multiple open tabs.
-
-#### 4. [providers.js](file:///c:/Users/lavin/psytream/frontend/scripts/providers.js)
-- Handles client fetches to backend endpoints. Queries backend source routes, failing over to fallback server URLs if the primary server fails.
-
-#### 5. [storage.js](file:///c:/Users/lavin/psytream/frontend/scripts/storage.js)
-- Handles client caching. Sets structures inside LocalStorage prefixed with `safestream_` and includes expiry indicators (TTL verification).
-
-#### 6. [utils.js](file:///c:/Users/lavin/psytream/frontend/scripts/utils.js)
-- Defines common utility functions: `timeAgo()`, `formatTime()`, standard DOM selectors, toast display widgets, debouncers, and TMDB fetch functions.
+### How it Works:
+1.  **Target Resolving**: The proxy parses the upstream URL parameter sent via query strings (`?host=...`), appending token and search parameters.
+2.  **Header Sanitization**: Custom headers (such as `Referer`, `Origin`, and `User-Agent` requested by scrapers) are forwarded dynamically to make the request appear as a valid consumer browser, avoiding CDN blocks. The HTTP `Range` header is passed through to support scrubbing and progressive download features.
+3.  **Stream Branch Paths**:
+    *   **Text/Playlists (`.m3u8`)**: For HLS playlist configuration files, the proxy downloads the file as text using `got-scraping`. It inspects each line of the document and **rewrites nested sub-playlist URLs** to route back through the self-hosted proxy. For media segments (`.ts` chunk URLs), it leaves them absolute to allow direct CDN streaming when CORS allows, optimizing bandwidth.
+    *   **Binary Media Chunks (`.ts`, `.mp4`)**: For binary media, the proxy creates an upstream request stream using `got-scraping` (avoiding TLS fingerprint detection from Cloudflare and CDNs) and pipes the byte stream directly to the client's HTTP response.
 
 ---
 
-## 🔗 Step-by-Step Integration & Media Flow
+## 📊 Telemetry Engine (`backend/server/utils/metrics.ts`)
 
-The following sequence details exactly what happens when a user searches for and plays content on SafeStream:
+SafeStream V2 embeds a multi-stage monitoring engine powered by `prom-client` to keep track of scraper performance, watch telemetry, and server health.
+
+```text
+Intervals managed by the Telemetry Engine:
+├── default (All-Time): Hydrated on boot, persists all-time metrics
+├── daily: Tracked via Daily Registry, cleared at midnight by cron tasks
+├── weekly: Tracked via Weekly Registry, cleared every Sunday by cron tasks
+└── monthly: Tracked via Monthly Registry, cleared on the 1st of each month
+```
+
+### Telemetry Collectors:
+*   `mw_user_count`: Aggregates active registered accounts grouped by namespace.
+*   `mw_captcha_solves`: Counts captcha success vs failure counts.
+*   `mw_provider_hostname_count`: Logs hostnames targeted during scrape cycles.
+*   `mw_provider_status_count`: Measures individual scraper provider response codes.
+*   `mw_media_watch_count`: Telemetry detailing watched movie titles, type, successful provider, and search success rate.
+*   `mw_provider_tool_count`: Tracks underlying scraper helper calls.
+*   `http_request_duration_seconds` & `http_request_summary_seconds`: High-resolution histograms detailing REST request durations grouped by method, route, and status code.
+
+### Persistence and Resiliency:
+*   **Startup Restoration**: Metrics are saved locally as `.metrics_[interval].json` snapshots every **60 seconds** and on process exit (`SIGTERM`, `SIGINT`). On application boot, the plugin restores telemetry states from these files.
+*   **Nitro Tasks & Cron**: Real-time cron jobs clear target intervals using Nitro's task executor, triggering setup routines that wipe metrics files and register clean registry states at midnight intervals.
+
+---
+
+## 🖥️ Frontend Client Architecture (`frontend/`)
+
+The client side is optimized to run on lightweight consumer devices as a Single Page Application (SPA), utilizing vanilla technologies for maximum load efficiency.
+
+### Core JavaScript Architecture:
+*   **[main.js](file:///c:/Users/lavin/psytream/frontend/scripts/main.js)**: Boots client components (`Player.init()`, `SyncEngine.init()`), configures debounced input fields (500ms delay) to lookup media details, populates responsive TV season/episode grids, and initiates local watch history card lists.
+*   **[player.js](file:///c:/Users/lavin/psytream/frontend/scripts/player.js)**:
+    *   **HLS.js Loader Hooking**: Wraps HLS.js instantiation, intercepting playlist queries to inject custom headers (User-Agent, Referers) and routing HLS requests through the backend's `/proxy` endpoint.
+    *   **Subtitles Engine**: Downloads captions, parses standard SRT/VTT structures line-by-line using timestamp ranges, and overlays styled text in real-time onto the video viewport.
+    *   **Automatic Provider Fallback**: If a video segment triggers fatal stream errors or loading hangs for more than **15 seconds**, the player catches the failure, halts execution, and falls back to the next scraping provider source returned in the scraper array.
+    *   **Keyboard Binds**: Map spacebar to play/pause, arrows left/right to skip 10s, arrows up/down to control volume, `F` for fullscreen, `M` to mute, and `ESC` to exit player.
+*   **[sync.js](file:///c:/Users/lavin/psytream/frontend/scripts/sync.js)**: Runs a 10-second sync loop with the backend user watch history routes. Leverages a browser `BroadcastChannel` (`safestream_sync`) to alert and update active playback coordinates across other open browser tabs instantly.
+*   **[storage.js](file:///c:/Users/lavin/psytream/frontend/scripts/storage.js)**: Manages key-value pairs in LocalStorage prefixed with `safestream_` using TTL expiration checks.
+
+---
+
+## 🔗 Step-by-Step Media Flow Sequence
+
+The sequence chart below details the entire flow of operations when a user searches for, plays, and updates watch progress on SafeStream V2:
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User
-    participant Front as Frontend (Browser)
+    participant Front as Frontend (Browser / Tauri)
     participant Back as Nitro Backend
     participant TMDB as TMDB API
-    participant Scraper as Scraper Engine
-    participant Video as Video Host
+    participant Scraper as providers-lib Scraping Engine
+    participant Proxy as Stream Proxy
+    participant CDN as Media Host CDN
 
-    User->>Front: Types title in Search Bar
+    User->>Front: Types query in Search Bar
     Front->>TMDB: Search query request (debounced)
-    TMDB-->>Front: Return metadata & TMDB ID
-    Front->>User: Renders search results dropdown
-    User->>Front: Clicks on result
+    TMDB-->>Front: Return media metadata & TMDB ID
+    Front->>User: Renders search results layout
+    User->>Front: Clicks on title card
     
     opt If TV Show
         Front->>TMDB: Request TV season details
@@ -265,32 +311,40 @@ sequenceDiagram
 
     Front->>Back: GET /sources/:tmdbId?type=...&season=...&episode=...
     activate Back
-    Back->>Scraper: runAll({ media })
+    Back->>Scraper: Execute Scrape RunAll({ media })
     activate Scraper
-    Scraper->>Video: Scrape provider sites & resolve embeds
-    Video-->>Scraper: Return raw stream URLs (.m3u8 / .mp4) & Captions
-    Scraper-->>Back: Returns resolved sources list
+    Scraper->>CDN: Resolve indexers & decrypt embeds
+    CDN-->>Scraper: Return raw stream source URLs (.m3u8 / .mp4) & Captions
+    Scraper-->>Back: Returns sorted list of resolved streams
     deactivate Scraper
-    Back-->>Front: Return JSON (ordered sources & captions arrays)
+    Back-->>Front: Return JSON payload of streams & subtitles
     deactivate Back
 
-    Front->>Front: Initialize HLS.js with primary stream
-    Front->>Video: HLS.js requests chunks
-    Video-->>Front: Serves stream chunks
-    Front->>User: Playback begins
+    Front->>Front: Initialize HLS.js with primary stream source
+    Front->>Proxy: Playback requests: /proxy?host=...&headers=...
+    activate Proxy
+    Proxy->>CDN: Download stream segment with spoofed headers
+    CDN-->>Proxy: Return binary data chunks / text playlists
+    Proxy->>Proxy: Rewrite HLS manifest files to proxy nested paths
+    Proxy-->>Front: Stream data to HLS.js player
+    deactivate Proxy
+    Front->>User: Playback starts
 
-    loop Every 2 Seconds
+    loop Every 10 Seconds
         Front->>Front: Save progress locally to LocalStorage
-        Front->>Back: PUT /watch-history/:tmdbId (Update watched seconds)
-        Back->>Back: Prisma upsert history record (fallback to JSON DB on fail)
-        Front->>Front: Broadcast channel emits UPDATE to other active tabs
+        Front->>Back: PUT /users/me/watch-history/:tmdbId (Update watched coordinates)
+        Back->>Back: Save to Database (falls back to Local JSON database on failure)
+        Front->>Front: Emit BroadcastChannel sync event to other active client tabs
     end
 
-    opt On Stream Failure
-        Front->>Front: HLS.js triggers fatal error / Timeout 15s
-        Front->>Front: Switch to Source #2 in JSON array
-        Front->>Video: HLS.js requests source #2 stream
-        Front->>User: Resume playback seamlessly
+    opt On Stream Segment / Network Timeout (>15s)
+        Front->>Front: Catch Player Error / Loader Timeout
+        Front->>Front: Extract Next Stream Source from Scraper Array
+        Front->>Proxy: Re-route stream request to Source #2
+        Proxy->>CDN: Fetch Source #2 stream segments
+        CDN-->>Proxy: Return Source #2 segment data
+        Proxy-->>Front: Pipe data to player
+        Front->>User: Playback resumes seamlessly
     end
 ```
 
@@ -298,37 +352,61 @@ sequenceDiagram
 
 ## 🛠️ Configuration & Deployment Guide
 
-### Environment Variables (`.env`)
-For the backend to run properly, configure the following keys:
+### Core Environment Variables (`.env`)
+To run the server, populate the following configurations in your environment file:
+
 ```env
-# Database Credentials
-DATABASE_URL=postgresql://user:password@hostname/dbname
+# Relational Database URL
+DATABASE_URL="postgresql://user:password@hostname:5432/dbname?schema=public"
 
-# API Integrations
-TMDB_API_KEY=797f74f09af514f1d6f9ecdbf70e8597
-TRAKT_CLIENT_ID=optional_trakt_client_key
-TRAKT_SECRET_ID=optional_trakt_secret_key
+# Database Provider (Set to 'supabase' to enable supabase pgBouncer pooling config)
+DB_PROVIDER="supabase"
+DB_POOL_MAX=10
 
-# Security
-CRYPTO_SECRET=your_minimum_32_character_security_key
+# API Configuration
+TMDB_API_KEY="your_tmdb_api_key"
+TRAKT_CLIENT_ID="optional_trakt_client_id"
+TRAKT_SECRET_ID="optional_trakt_client_secret"
 
-# Port
+# Cryptographic Signatures JWT Key
+CRYPTO_SECRET="minimum_32_character_security_secret_string"
+
+# Port & Node Environment
 PORT=3000
-NODE_ENV=production
+NODE_ENV="production"
 ```
 
-### Running Locally
-1. **Backend**:
-   ```bash
-   cd backend
-   npm install
-   # Generates Prisma schemas and starts developer server
-   npm run dev
-   ```
-2. **Frontend**:
-   ```bash
-   cd frontend
-   npm install
-   # Launches Vite dev server
-   npm run dev
-   ```
+### Local Development Setup:
+1.  **Clone & Installation**:
+    ```bash
+    # Install monorepo dependencies
+    npm install
+    ```
+2.  **Database Migration**:
+    ```bash
+    cd backend
+    # Run Prisma migrations
+    npx prisma migrate dev
+    ```
+3.  **Booting the Stack**:
+    *   **Start Backend Developer Server**:
+        ```bash
+        cd backend
+        npm run dev
+        ```
+    *   **Start Frontend Developer Server**:
+        ```bash
+        cd frontend
+        npm run dev
+        ```
+
+### Building the Desktop Application (Tauri):
+1.  Navigate to the frontend workspace:
+    ```bash
+    cd frontend
+    ```
+2.  Compile the desktop client for your target platform (macOS/Windows/Linux):
+    ```bash
+    npm run tauri build
+    ```
+    *The binary installer package will be outputted under `frontend/src-tauri/target/release/bundle/`.*

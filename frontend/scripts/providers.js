@@ -11,7 +11,6 @@
 window.Providers = {
     // Empty — we use relative URLs, so no absolute backend URL needed
     backends: [''],
-
     currentBackendIndex: 0,
 
     getSources: async (tmdbId, type, season = null, episode = null) => {
