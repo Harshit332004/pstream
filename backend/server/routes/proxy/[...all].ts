@@ -119,17 +119,37 @@ export default defineEventHandler(async (event) => {
       // init segments) to route back through this proxy. This eliminates
       // cross-origin CORS failures that broke Chrome/Safari/mobile.
       // ═══════════════════════════════════════════════════════════════
-      const response = await gotScraping({
-        url: targetUrl.toString(),
-        method,
-        headers: upstreamHeaders,
-        responseType: 'text',
-        throwHttpErrors: false,
-      });
+      let responseText: string;
+      let responseHeaders: Headers | Record<string, string | string[] | undefined>;
+      let responseStatusCode: number;
 
-      if (response.statusCode >= 400) {
-        event.node.res.statusCode = response.statusCode;
-        return response.body;
+      try {
+        const fetchRes = await fetch(targetUrl.toString(), {
+          method,
+          headers: upstreamHeaders as any,
+          redirect: 'follow',
+        });
+        if (fetchRes.status === 403) throw new Error('403 from native fetch');
+        responseText = await fetchRes.text();
+        responseStatusCode = fetchRes.status;
+        responseHeaders = fetchRes.headers;
+      } catch (err: any) {
+        console.warn('[Proxy] Native fetch failed for m3u8, falling back to gotScraping:', err.message);
+        const gsResponse = await gotScraping({
+          url: targetUrl.toString(),
+          method,
+          headers: upstreamHeaders,
+          responseType: 'text',
+          throwHttpErrors: false,
+        });
+        responseText = gsResponse.body;
+        responseStatusCode = gsResponse.statusCode || 200;
+        responseHeaders = gsResponse.headers;
+      }
+
+      if (responseStatusCode >= 400) {
+        event.node.res.statusCode = responseStatusCode;
+        return responseText;
       }
 
       // Helper: rewrite any URL to route through our proxy
@@ -176,7 +196,12 @@ export default defineEventHandler(async (event) => {
       // Set response headers
       const headersToForward = ['cache-control', 'expires'];
       for (const h of headersToForward) {
-        if (response.headers[h]) setResponseHeader(event, h, response.headers[h] as string);
+        if (responseHeaders && typeof (responseHeaders as any).get === 'function') {
+          const val = (responseHeaders as Headers).get(h);
+          if (val) setResponseHeader(event, h, val);
+        } else if (responseHeaders && (responseHeaders as any)[h]) {
+          setResponseHeader(event, h, (responseHeaders as any)[h] as string);
+        }
       }
       setResponseHeader(event, 'content-type', 'application/vnd.apple.mpegurl');
       setResponseHeader(event, 'content-length', Buffer.byteLength(rewrittenM3u8));
