@@ -1,0 +1,70 @@
+
+/* External Source Selector */
+.external-source-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 20px auto 40px auto;
+    max-width: 1200px;
+    width: 90%;
+    justify-content: center;
+    align-items: center;
+    padding: 15px 20px;
+    background: rgba(20, 20, 25, 0.5);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+}
+
+.external-source-selector.hidden {
+    display: none !important;
+}
+
+.source-selector-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    margin-right: 8px;
+    white-space: nowrap;
+}
+
+.source-btn {
+    padding: 8px 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.source-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
+
+.source-btn.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary-light);
+    box-shadow: 0 0 15px rgba(235, 87, 87, 0.3);
+}
+
+.source-btn::before {
+    content: "📺";
+    font-size: 0.9rem;
+}
+
+.source-quality {
+    opacity: 0.7;
+    font-size: 0.75rem;
+    font-weight: 400;
+}
+

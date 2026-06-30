@@ -4,7 +4,7 @@
  */
 
 window.SyncEngine = {
-    backendUrl: (import.meta.env.VITE_BACKEND_URL || window.location.origin).replace(/\/+$/, ''),
+    apiUrl: import.meta.env.VITE_HF_API_URL || 'http://localhost:7860',
     userId: null,
     syncInterval: 10000, // 10 seconds
     syncTimeout: null,
@@ -73,7 +73,7 @@ window.SyncEngine = {
         
         try {
             await fetchWithTimeout(
-                `${SyncEngine.backendUrl}/users/${SyncEngine.userId}/watch-history/${media.tmdbId}`,
+                `${SyncEngine.apiUrl}/users/${SyncEngine.userId}/watch-history/${media.tmdbId}`,
                 {
                     method: 'PUT',
                     headers: {
@@ -107,7 +107,7 @@ window.SyncEngine = {
         
         try {
             const response = await fetchWithTimeout(
-                `${SyncEngine.backendUrl}/users/${SyncEngine.userId}/watch-history`,
+                `${SyncEngine.apiUrl}/users/${SyncEngine.userId}/watch-history`,
                 {},
                 5000
             );
@@ -152,7 +152,7 @@ window.SyncEngine = {
         if (isOnline()) {
             try {
                 await fetchWithTimeout(
-                    `${SyncEngine.backendUrl}/users/${SyncEngine.userId}/watch-history`,
+                    `${SyncEngine.apiUrl}/users/${SyncEngine.userId}/watch-history`,
                     {
                         method: 'DELETE'
                     },

@@ -33,6 +33,7 @@
                 <div class="header-content">
                     <h1 class="logo">Stream<span class="accent">Safe</span></h1>
                     <div class="header-stats">
+                        <button id="diagnostics-btn" class="btn btn-ghost small" style="margin-right: 15px;">🩺 Diagnostics</button>
                         <span id="connection-status" class="status-indicator online" title="Connection status">●</span>
                     </div>
                 </div>
@@ -149,6 +150,12 @@
                                                 </div>
                                             </div>
                                             <div class="settings-section">
+                                                <h4>Speed</h4>
+                                                <div class="settings-options" id="settings-speed-list">
+                                                    <!-- Dynamically populated -->
+                                                </div>
+                                            </div>
+                                            <div class="settings-section">
                                                 <h4>Subtitles</h4>
                                                 <div class="settings-options" id="settings-subtitle-list">
                                                     <!-- Dynamically populated -->
@@ -166,11 +173,13 @@
                                     <button id="custom-fullscreen-btn" class="ctrl-btn" title="Fullscreen">📺</button>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-
                     <p class="player-tip">💡 Use ← → arrow keys to skip 10s | Space to play/pause | ESC to close</p>
                 </section>
+
+                <!-- External Source Selector (Moved outside player, above Continue Watching) -->
+                <div id="external-source-selector" class="external-source-selector hidden">
+                    <!-- Dynamically populated via JS -->
+                </div>
 
                 <!-- History Section -->
                 <section class="history-section">
@@ -201,8 +210,59 @@
 
         <!-- Toast Notifications -->
         <div id="toast-container" class="toast-container"></div>
+
+        <!-- Diagnostics Console Overlay -->
+        <div id="diagnostics-overlay" class="diagnostics-overlay hidden">
+            <div class="diagnostics-panel">
+                <div class="diagnostics-header">
+                    <h3>🩺 System Diagnostics</h3>
+                    <button id="close-diagnostics-btn" class="close-btn">✕</button>
+                </div>
+                <div class="diagnostics-body">
+                    <div class="health-section">
+                        <h4>System Health Checks</h4>
+                        <div class="health-item">
+                            <span class="health-label">API Target:</span>
+                            <span id="diag-api-url" class="diag-value">Loading...</span>
+                        </div>
+                        <div class="health-item">
+                            <span class="health-label">Backend URL:</span>
+                            <span id="diag-backend-status" class="diag-status status-checking">Checking...</span>
+                        </div>
+                        <div class="health-item">
+                            <span class="health-label">CinePro Server:</span>
+                            <span id="diag-cinepro-status" class="diag-status status-checking">Checking...</span>
+                        </div>
+                        <div class="health-item">
+                            <span class="health-label">TMDB Connection:</span>
+                            <span id="diag-tmdb-status" class="diag-status status-checking">Checking...</span>
+                        </div>
+                    </div>
+                    
+                    <div class="logs-section">
+                        <div class="logs-header">
+                            <h4>Client Console Logs</h4>
+                            <button id="clear-logs-btn" class="btn btn-ghost small">Clear Logs</button>
+                        </div>
+                        <div id="diagnostics-logs" class="diagnostics-logs">
+                            <!-- Logs dynamically appended -->
+                        </div>
+                    </div>
+                    
+                    <div class="troubleshooting-section">
+                        <h4>💡 Quick Fix Guides</h4>
+                        <ul>
+                            <li><strong>Backend Offline:</strong> Open <a href="https://huggingface.co/spaces/gunnergg/pstream-backend" target="_blank">Hugging Face Space</a> and make sure it is 🟢 Running (not building or sleeping).</li>
+                            <li><strong>CinePro Offline:</strong> Open Hugging Face container logs to verify the microservice started concurrently.</li>
+                            <li><strong>CORS Blocked:</strong> Verify that Vercel is served over HTTPS and matches the Hugging Face HTTPS endpoint.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
+    <script type="module" src="/scripts/diagnostics.js"></script>
     <script type="module" src="/scripts/utils.js"></script>
     <script type="module" src="/scripts/storage.js"></script>
     <script type="module" src="/scripts/sync.js"></script>

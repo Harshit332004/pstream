@@ -10,22 +10,26 @@
 
 window.Providers = {
     // Empty — we use relative URLs, so no absolute backend URL needed
-    backends: [''],
+    apiUrl: import.meta.env.VITE_HF_API_URL || 'http://localhost:7860',
     currentBackendIndex: 0,
 
     getSources: async (tmdbId, type, season = null, episode = null) => {
-        const backendUrl = (import.meta.env.VITE_BACKEND_URL || window.location.origin).replace(/\/+$/, '');
-        const url = new URL(`/sources/${tmdbId}`, backendUrl);
+        const url = new URL(`/api/stream`, window.Providers.apiUrl);
+        url.searchParams.set('id', tmdbId);
         url.searchParams.set('type', type);
         if (season) url.searchParams.set('season', season);
         if (episode) url.searchParams.set('episode', episode);
 
-        const response = await fetchWithTimeout(url.toString(), {}, 20000);
+        const response = await fetchWithTimeout(url.toString(), {}, 30000);
 
         if (response.ok) {
             const data = await response.json();
-            if (data.sources && data.sources.length > 0) {
-                return data;
+            if (data.success && data.streams && data.streams.length > 0) {
+                return {
+                    sources: data.streams,
+                    subtitles: data.subtitles || [],
+                    provider: data.streams[0].provider // Default to first provider for backwards compatibility if needed
+                };
             }
         }
 
@@ -38,9 +42,8 @@ window.Providers = {
 
     getDiscovery: async () => {
         try {
-            const backendUrl = (import.meta.env.VITE_BACKEND_URL || window.location.origin).replace(/\/+$/, '');
             const response = await fetchWithTimeout(
-                `${backendUrl}/discover`,
+                `${window.Providers.apiUrl}/discover`,
                 {},
                 10000
             );

@@ -1,39 +1,24 @@
-FROM node:22-alpine
+FROM node:20-alpine
+
 WORKDIR /app
 
-# Install curl (for Coolify healthchecks) and openssl (required by Prisma on Alpine)
-RUN apk add --no-cache curl openssl
-
-# 1. Copy dependency files first to maximize Docker layer caching
+# Install main backend dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm ci --omit=dev
 
-# 2. Copy All folders for future proofing incase of custom setups later on
-COPY . .
+# Copy application source code
+COPY server.js ./
+COPY scrapers/ ./scrapers/
 
-# 3. Define build arguments (ARGs). 
-# These will be available for `prisma generate` and `npm run build`, 
-ARG DATABASE_URL=postgresql://CHANGETHISDONOTFOLLOWTHIS:5432/placeholder_db
-ARG META_NAME
-ARG META_DESCRIPTION
-ARG CRYPTO_SECRET
-ARG TMDB_API_KEY
-ARG CAPTCHA=false
-ARG CAPTCHA_CLIENT_KEY
-ARG TRAKT_CLIENT_ID
-ARG TRAKT_SECRET_ID
+# Create a non-root user (appuser) and set ownership
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN chown -R appuser:appgroup /app
 
-# 4. Generate Prisma client using the build-only placeholder URL
-RUN DATABASE_URL=${DATABASE_URL} npx prisma generate
+# Switch to the non-root user
+USER appuser
 
-# 5. Build the application (it will use the ARGs above during compilation)
-RUN npm run build
+# Expose port required by Hugging Face Spaces
+EXPOSE 7860
 
-# 6. Set ONLY the essential, safe runtime variable.
-ENV NODE_ENV=production
-
-EXPOSE 3000
-
-# Run migrations and start the server
-# Users MUST provide the real variables via Docker Run / Compose
-CMD ["sh", "-c", "npx prisma migrate deploy && node .output/server/index.mjs"]
+# Start the application
+CMD ["npm", "start"]

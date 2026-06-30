@@ -306,3 +306,190 @@ section h2 {
         transition-duration: 0.01ms !important;
     }
 }
+
+/* System Diagnostics Overlay */
+.diagnostics-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    padding: var(--space-md);
+}
+
+.diagnostics-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    width: 100%;
+    max-width: 600px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
+    overflow: hidden;
+}
+
+.diagnostics-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-md);
+    border-bottom: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.diagnostics-header h3 {
+    margin: 0;
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+}
+
+.diagnostics-header .close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: var(--space-xs);
+    line-height: 1;
+}
+
+.diagnostics-header .close-btn:hover {
+    color: var(--text-primary);
+}
+
+.diagnostics-body {
+    padding: var(--space-md);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.diagnostics-body h4 {
+    margin-bottom: var(--space-sm);
+    font-size: var(--font-size-base);
+    color: var(--text-primary);
+    font-weight: 600;
+    border-left: 3px solid var(--accent);
+    padding-left: var(--space-xs);
+}
+
+.health-section, .logs-section, .troubleshooting-section {
+    background: rgba(255,255,255,0.01);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+}
+
+.health-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-xs) 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    font-size: var(--font-size-sm);
+}
+
+.health-item:last-child {
+    border-bottom: none;
+}
+
+.health-label {
+    color: var(--text-secondary);
+}
+
+.diag-value {
+    font-family: monospace;
+    color: var(--text-muted);
+    word-break: break-all;
+    max-width: 60%;
+}
+
+.diag-status {
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.status-checking {
+    background: rgba(250, 204, 21, 0.1);
+    color: #facc15;
+}
+
+.status-online {
+    background: rgba(52, 211, 153, 0.1);
+    color: var(--success);
+}
+
+.status-offline {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--danger);
+}
+
+.logs-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-sm);
+}
+
+.diagnostics-logs {
+    background: #05070c;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: var(--space-sm);
+    height: 180px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.log-entry {
+    line-break: anywhere;
+    white-space: pre-wrap;
+}
+
+.log-time {
+    color: var(--text-muted);
+}
+
+.log-info {
+    color: var(--text-secondary);
+}
+
+.log-warning {
+    color: #fbbf24;
+}
+
+.log-error {
+    color: var(--danger);
+}
+
+.troubleshooting-section ul {
+    margin: 0;
+    padding-left: var(--space-md);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.troubleshooting-section a {
+    color: var(--accent-light);
+    text-decoration: none;
+}
+
+.troubleshooting-section a:hover {
+    text-decoration: underline;
+}
+

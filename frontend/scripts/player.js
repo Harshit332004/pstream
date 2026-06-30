@@ -17,6 +17,7 @@ window.Player = {
     isSettingsOpen: false,
     isFallbackTriggered: false,
     loadTimeout: null,
+    currentSpeed: 1.0,
     
     init: () => {
         Player.videoElement = DOM.get('video-player');
@@ -106,6 +107,18 @@ window.Player = {
             Player.currentSources = result.sources;
             Player.currentSubtitles = result.subtitles || [];
             Player.activeSubtitleIndex = -1; // Default: off
+            Player.currentSpeed = 1.0; // Reset playback speed
+
+            // Auto-select English subtitles
+            if (Player.currentSubtitles.length > 0) {
+                const englishIdx = Player.currentSubtitles.findIndex(sub => {
+                    const lang = (sub.language || '').toLowerCase();
+                    return lang === 'en' || lang === 'eng' || lang.includes('english');
+                });
+                if (englishIdx !== -1) {
+                    Player.activeSubtitleIndex = englishIdx;
+                }
+            }
             
             Player.switchSource(0);
             Player.startProgressHeartbeat();
@@ -158,25 +171,23 @@ window.Player = {
                 Player.loadDirectStream(source);
             }
             Player.updateSourceMenu();
+            Player.updateExternalSourceMenu();
             Player.updateSubtitleMenu();
+            Player.updateSpeedMenu();
+            
+            // Auto-load selected subtitle
+            if (Player.activeSubtitleIndex !== -1 && Player.currentSubtitles[Player.activeSubtitleIndex]) {
+                const sub = Player.currentSubtitles[Player.activeSubtitleIndex];
+                Player.loadSubtitlesFile(sub.url);
+            }
         } catch (e) {
             console.error('Failed to load source:', e);
             Player.handlePlaybackError(e);
         }
     },
-    
-    // Resolve a relative backend URL (like /proxy/...) to an absolute URL using the backend origin
-    resolveBackendUrl: (relativeUrl) => {
-        if (!relativeUrl) return relativeUrl;
-        // If already absolute, return as-is
-        if (relativeUrl.startsWith('http://') || relativeUrl.startsWith('https://')) return relativeUrl;
-        const backendUrl = (import.meta.env.VITE_BACKEND_URL || window.location.origin).replace(/\/+$/, '');
-        return backendUrl + relativeUrl;
-    },
-
     loadHLSStream: (source) => {
-        const sanitizedUrl = Player.resolveBackendUrl(Player.sanitizeStreamUrl(source.url));
-        console.log('Loading HLS stream (resolved):', sanitizedUrl);
+        const sanitizedUrl = Player.sanitizeStreamUrl(source.url);
+        console.log('Loading HLS stream:', sanitizedUrl);
         
         // Native HLS fallback for Safari/iOS or browsers without MSE support
         if (!window.Hls || !Hls.isSupported()) {
@@ -190,6 +201,8 @@ window.Player = {
                     if (Player.currentMedia && Player.currentMedia.timestamp) {
                         Player.videoElement.currentTime = Player.currentMedia.timestamp;
                     }
+                    // Apply playback speed
+                    Player.videoElement.playbackRate = Player.currentSpeed;
                     Player.videoElement.play().catch(() => console.warn('Autoplay prevented'));
                     Player.videoElement.removeEventListener('loadedmetadata', onNativeMeta);
                 };
@@ -200,76 +213,32 @@ window.Player = {
             return;
         }
         
-        // Custom loader to sanitize, decode URLs, and handle proxy fallback for HLS requests
-        class CustomLoader extends Hls.DefaultConfig.loader {
-            constructor(config) {
-                super(config);
-                const originalLoad = this.load.bind(this);
-                this.load = (context, loaderConfig, callbacks) => {
-                    if (context && context.url) {
-                        context.url = Player.sanitizeStreamUrl(context.url);
-                    }
-                    
-                    const originalOnError = callbacks.onError;
-                    callbacks.onError = (error, contextData, networkDetails) => {
-                        const isDirectCDN = contextData && contextData.url && !contextData.url.includes('/proxy');
-                        if (isDirectCDN) {
-                            console.warn(`[Player Fallback] Direct fetch failed for ${contextData.url}. Retrying through proxy...`);
-                            try {
-                                const originalUrl = new URL(contextData.url);
-                                const activeSource = Player.currentSources[Player.currentSourceIndex];
-                                if (activeSource && activeSource.url) {
-                                    // Extract proxyHeaders from the sanitized source URL
-                                    const sanitizedSourceUrl = Player.sanitizeStreamUrl(activeSource.url);
-                                    const backendUrl = (import.meta.env.VITE_BACKEND_URL || window.location.origin).replace(/\/+$/, '');
-                                    const sourceUrlObj = new URL(sanitizedSourceUrl, backendUrl);
-                                    const proxyHeadersParam = sourceUrlObj.searchParams.get('proxyHeaders');
-                                    
-                                    const proxyUrl = new URL(backendUrl + '/proxy' + originalUrl.pathname);
-                                    proxyUrl.searchParams.set('host', originalUrl.origin);
-                                    if (proxyHeadersParam) {
-                                        proxyUrl.searchParams.set('proxyHeaders', proxyHeadersParam);
-                                    }
-                                    // Preserve existing query params on the chunk/key
-                                    for (const [key, val] of originalUrl.searchParams.entries()) {
-                                        proxyUrl.searchParams.set(key, val);
-                                    }
-                                    
-                                    contextData.url = proxyUrl.toString();
-                                    console.log(`[Player Fallback] Retrying load via proxy: ${contextData.url}`);
-                                    originalLoad(contextData, loaderConfig, callbacks);
-                                    return;
-                                }
-                            } catch (e) {
-                                console.error('[Player Fallback] Failed to construct proxy URL for fallback retry:', e);
-                            }
-                        }
-                        originalOnError(error, contextData, networkDetails);
-                    };
-                    
-                    originalLoad(context, loaderConfig, callbacks);
-                };
-            }
-        }
-
-        // NOTE: Do NOT add xhrSetup here. The proxy reads forwarding headers
-        // (Referer, Origin, User-Agent) from the URL query parameter (?headers={...}),
-        // NOT from the browser's actual HTTP headers. Setting headers via xhrSetup
-        // is impossible anyway (they are forbidden browser headers), and the mere
-        // presence of xhrSetup causes Chrome/Edge to send Origin + Sec-Fetch-*
-        // headers that trigger 403 Forbidden from the proxy server.
+        // NOTE: Do NOT add xhrSetup here unless specifically needed by a future custom API.
+        // The previous backend proxy relied on NO extra headers being sent by the browser.
         Player.hls = new Hls({
             debug: false,
             enableWorker: true,
             maxBufferLength: 15,
             maxMaxBufferLength: 30,
-            pLoader: CustomLoader,
-            fLoader: CustomLoader,
-            keyLoader: CustomLoader,
         });
         
         Player.hls.on(Hls.Events.MANIFEST_PARSED, () => {
             Player.clearLoadTimeout();
+            
+            // Auto-select highest quality level
+            if (Player.hls.levels && Player.hls.levels.length > 0) {
+                let highestIdx = 0;
+                let maxHeight = 0;
+                Player.hls.levels.forEach((level, idx) => {
+                    if (level.height > maxHeight) {
+                        maxHeight = level.height;
+                        highestIdx = idx;
+                    }
+                });
+                Player.hls.currentLevel = highestIdx;
+                console.log(`[Player] Automatically selected highest HLS level: ${maxHeight}p`);
+            }
+            
             Player.updateQualityMenu();
             Player.showLoader(false);
             
@@ -277,6 +246,9 @@ window.Player = {
             if (Player.currentMedia && Player.currentMedia.timestamp) {
                 Player.videoElement.currentTime = Player.currentMedia.timestamp;
             }
+            
+            // Apply playback speed
+            Player.videoElement.playbackRate = Player.currentSpeed;
             
             Player.videoElement.play().catch(() => {
                 console.warn('Autoplay prevented');
@@ -296,8 +268,8 @@ window.Player = {
     },
     
     loadDirectStream: (source) => {
-        const sanitizedUrl = Player.resolveBackendUrl(Player.sanitizeStreamUrl(source.url));
-        console.log('Loading Direct stream (resolved):', sanitizedUrl);
+        const sanitizedUrl = Player.sanitizeStreamUrl(source.url);
+        console.log('Loading Direct stream:', sanitizedUrl);
         
         Player.videoElement.src = sanitizedUrl;
         Player.videoElement.onloadedmetadata = () => {
@@ -309,6 +281,9 @@ window.Player = {
             if (Player.currentMedia && Player.currentMedia.timestamp) {
                 Player.videoElement.currentTime = Player.currentMedia.timestamp;
             }
+            
+            // Apply playback speed
+            Player.videoElement.playbackRate = Player.currentSpeed;
             
             Player.videoElement.play().catch(() => {});
         };
@@ -506,6 +481,29 @@ window.Player = {
         }
     },
     
+    updateSpeedMenu: () => {
+        const listContainer = DOM.get('settings-speed-list');
+        if (!listContainer) return;
+        listContainer.innerHTML = '';
+        
+        const speeds = [1.0, 1.25, 1.5, 1.75, 2.0];
+        speeds.forEach((speed) => {
+            const opt = document.createElement('div');
+            opt.className = 'settings-option' + (Player.currentSpeed === speed ? ' active' : '');
+            opt.textContent = speed === 1.0 ? 'Normal' : `${speed}x`;
+            opt.addEventListener('click', () => {
+                Player.currentSpeed = speed;
+                if (Player.videoElement) {
+                    Player.videoElement.playbackRate = speed;
+                }
+                showToast(`⚡ Speed: ${speed === 1.0 ? 'Normal' : speed + 'x'}`, 'info', 1000);
+                Player.toggleSettings(false);
+                Player.updateSpeedMenu();
+            });
+            listContainer.appendChild(opt);
+        });
+    },
+    
     updateSubtitleMenu: () => {
         const listContainer = DOM.get('settings-subtitle-list');
         listContainer.innerHTML = '';
@@ -556,12 +554,43 @@ window.Player = {
         Player.currentSources.forEach((src, i) => {
             const opt = document.createElement('div');
             opt.className = 'settings-option' + (Player.currentSourceIndex === i ? ' active' : '');
-            opt.textContent = src.provider;
+            const quality = src.quality ? ` (${src.quality})` : '';
+            opt.textContent = `${src.provider}${quality}`;
             opt.addEventListener('click', () => {
                 Player.switchSource(i);
                 Player.toggleSettings(false);
             });
             listContainer.appendChild(opt);
+        });
+    },
+
+    updateExternalSourceMenu: () => {
+        const selector = DOM.get('external-source-selector');
+        if (!selector) return;
+
+        if (!Player.currentSources || Player.currentSources.length === 0) {
+            selector.classList.add('hidden');
+            return;
+        }
+
+        selector.classList.remove('hidden');
+        selector.innerHTML = '';
+
+        // Add a label
+        const label = document.createElement('span');
+        label.className = 'source-selector-label';
+        label.textContent = '🎬 Sources';
+        selector.appendChild(label);
+        
+        Player.currentSources.forEach((src, i) => {
+            const btn = document.createElement('button');
+            btn.className = 'source-btn' + (Player.currentSourceIndex === i ? ' active' : '');
+            const quality = src.quality ? ` • ${src.quality}` : '';
+            btn.innerHTML = `${src.provider}<span class="source-quality">${quality}</span>`;
+            btn.addEventListener('click', () => {
+                Player.switchSource(i);
+            });
+            selector.appendChild(btn);
         });
     },
     
@@ -895,9 +924,12 @@ window.Player = {
         Player.videoElement.src = '';
         Player.subtitleCues = [];
         Player.activeSubtitleIndex = -1;
+        Player.currentSpeed = 1.0;
         
         DOM.hide('subtitle-overlay');
         DOM.hide('player-section');
+        const extSelector = DOM.get('external-source-selector');
+        if (extSelector) extSelector.classList.add('hidden');
         Player.toggleSettings(false);
         
         Player.currentMedia = null;
