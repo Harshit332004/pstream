@@ -1,6 +1,6 @@
 /**
  * Cross-Device Synchronization
- * Syncs watch history with official P-Stream backend
+ * Syncs watch history with the HF backend's persistent JSON storage
  */
 
 window.SyncEngine = {
@@ -19,7 +19,7 @@ window.SyncEngine = {
             try {
                 window.syncChannel = new BroadcastChannel('safestream_sync');
                 window.syncChannel.onmessage = (event) => {
-                    if (event.data.type === 'HISTORY_UPDATED') {
+                    if (event.data.type === 'HISTORY_UPDATED' || event.data.type === 'HISTORY_SYNCED') {
                         SyncEngine.pullHistory();
                     }
                 };
@@ -54,7 +54,7 @@ window.SyncEngine = {
         if (!media) return;
         
         // Local save
-        const history = Storage.history.add(media);
+        Storage.history.add(media);
         
         // Broadcast to other tabs
         if (window.syncChannel) {
@@ -90,7 +90,6 @@ window.SyncEngine = {
                         meta: {
                             title: media.title,
                             type: media.type === 'tv' ? 'show' : 'movie',
-                            year: media.year ? Number(media.year) : undefined,
                             poster: media.poster || ''
                         }
                     })
@@ -98,7 +97,7 @@ window.SyncEngine = {
                 5000
             );
         } catch (e) {
-            console.error('Failed to push progress:', e);
+            // Silently fail — local storage is the fallback
         }
     },
     
@@ -114,35 +113,51 @@ window.SyncEngine = {
             
             if (response.ok) {
                 const data = await response.json();
-                if (Array.isArray(data)) {
-                    // Map official backend watch history items to frontend format
+                if (Array.isArray(data) && data.length > 0) {
+                    // Map backend entries to frontend format
                     const mappedData = data.map(item => ({
                         tmdbId: item.tmdbId,
                         type: item.meta?.type === 'show' ? 'tv' : 'movie',
                         title: item.meta?.title || 'Unknown Title',
-                        season: item.season?.number || undefined,
-                        episode: item.episode?.number || undefined,
+                        season: item.seasonNumber || undefined,
+                        episode: item.episodeNumber || undefined,
                         timestamp: Math.floor(parseFloat(item.watched || '0')),
                         duration: Math.floor(parseFloat(item.duration || '0')),
                         last_updated: new Date(item.watchedAt || Date.now()).getTime(),
-                        completed: item.completed || false
+                        completed: item.completed || false,
+                        poster: item.meta?.poster || ''
                     }));
 
-                    Storage.history.set(mappedData);
-                    
-                    // Broadcast to other tabs
-                    if (window.syncChannel) {
-                        window.syncChannel.postMessage({
-                            type: 'HISTORY_SYNCED',
-                            data: mappedData
-                        });
+                    // Merge with local: remote wins for same key if newer
+                    const localHistory = Storage.history.get();
+                    const mergedMap = {};
+
+                    // Add local entries first
+                    for (const item of localHistory) {
+                        const key = Storage.history.getKey(item);
+                        mergedMap[key] = item;
                     }
+
+                    // Overwrite with remote entries if they have a more recent timestamp
+                    for (const item of mappedData) {
+                        const key = Storage.history.getKey(item);
+                        const existing = mergedMap[key];
+                        if (!existing || (item.last_updated || 0) >= (existing.last_updated || 0)) {
+                            mergedMap[key] = item;
+                        }
+                    }
+
+                    const mergedHistory = Object.values(mergedMap)
+                        .sort((a, b) => (b.last_updated || 0) - (a.last_updated || 0))
+                        .slice(0, 100);
+
+                    Storage.history.set(mergedHistory);
                     
                     window.dispatchEvent(new CustomEvent('sync_completed'));
                 }
             }
         } catch (e) {
-            console.warn('Failed to pull history:', e);
+            // Silently fail — local storage is the fallback
         }
     },
     
@@ -159,7 +174,7 @@ window.SyncEngine = {
                     5000
                 );
             } catch (e) {
-                console.error('Failed to clear history:', e);
+                console.error('Failed to clear remote history:', e);
             }
         }
     }

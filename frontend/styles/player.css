@@ -357,6 +357,35 @@
     transform: scale(1.05);
 }
 
+/* SVG Icon Sizing */
+.ctrl-btn svg {
+    width: 22px;
+    height: 22px;
+    fill: currentColor;
+    pointer-events: none;
+}
+
+.btn-overlay-play svg {
+    width: 28px;
+    height: 28px;
+    fill: currentColor;
+    pointer-events: none;
+}
+
+.btn-overlay-skip svg {
+    width: 28px;
+    height: 28px;
+    fill: currentColor;
+    pointer-events: none;
+}
+
+.btn-icon svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+    pointer-events: none;
+}
+
 .custom-time-display {
     font-size: var(--font-size-sm);
     color: var(--text-secondary);

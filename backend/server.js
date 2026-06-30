@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
+import path from 'path';
 import { LRUCache } from 'lru-cache';
 import { scrapeVidlink } from './scrapers/vidlink.js';
 
@@ -7,13 +9,60 @@ const app = express();
 const PORT = process.env.PORT || 7860;
 
 app.use(cors());
+app.use(express.json());
 
-// In-memory cache: 30 minutes TTL
+// ─── Stream Cache ───────────────────────────────────────────────────────────
 const streamCache = new LRUCache({
-    max: 500, // max 500 items
+    max: 500,
     ttl: 1000 * 60 * 30, // 30 mins
 });
 
+// ─── Watch History Persistence ──────────────────────────────────────────────
+const DATA_DIR = process.env.DATA_DIR || '/data';
+const HISTORY_FILE = path.join(DATA_DIR, 'watch-history.json');
+
+// Debounced write to avoid excessive disk I/O
+let historyWriteTimer = null;
+let historyCache = null; // in-memory cache of the full JSON
+
+function ensureDataDir() {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+    } catch (e) {
+        console.warn(`[History] Cannot create data dir ${DATA_DIR}: ${e.message}`);
+    }
+}
+
+function loadHistory() {
+    if (historyCache !== null) return historyCache;
+    try {
+        if (fs.existsSync(HISTORY_FILE)) {
+            historyCache = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+        } else {
+            historyCache = {};
+        }
+    } catch (e) {
+        console.error('[History] Failed to read history file:', e.message);
+        historyCache = {};
+    }
+    return historyCache;
+}
+
+function saveHistory() {
+    if (historyWriteTimer) clearTimeout(historyWriteTimer);
+    historyWriteTimer = setTimeout(() => {
+        try {
+            ensureDataDir();
+            fs.writeFileSync(HISTORY_FILE, JSON.stringify(historyCache, null, 2), 'utf8');
+        } catch (e) {
+            console.error('[History] Failed to write history file:', e.message);
+        }
+    }, 500); // debounce 500ms
+}
+
+// ─── Stream Route ───────────────────────────────────────────────────────────
 app.get('/api/stream', async (req, res) => {
     const { id, type, season, episode } = req.query;
 
@@ -31,9 +80,6 @@ app.get('/api/stream', async (req, res) => {
 
     console.log(`[FETCHING] Resolving streams for ${cacheKey}`);
     
-    let result = null;
-
-    // Helper for timeout
     const withTimeout = (promise, ms) => {
         let timeoutId;
         const timeoutPromise = new Promise((_, reject) => {
@@ -44,13 +90,12 @@ app.get('/api/stream', async (req, res) => {
 
     console.log(`-> Fetching from VidLink...`);
     const results = await Promise.allSettled([
-        withTimeout(scrapeVidlink(id, type, season, episode), 15000) // 15s limit for WASM startup
+        withTimeout(scrapeVidlink(id, type, season, episode), 15000)
     ]);
 
     const streams = [];
     const subtitles = [];
 
-    // Process VidLink
     if (results[0].status === 'fulfilled' && results[0].value.success) {
         const vidlinkStreams = results[0].value.streams || [];
         for (const s of vidlinkStreams) {
@@ -71,7 +116,7 @@ app.get('/api/stream', async (req, res) => {
     }
 
     if (streams.length > 0) {
-        result = { success: true, streams, subtitles };
+        const result = { success: true, streams, subtitles };
         streamCache.set(cacheKey, result);
         return res.json(result);
     }
@@ -79,6 +124,79 @@ app.get('/api/stream', async (req, res) => {
     return res.status(500).json({ success: false, error: 'Failed to resolve stream' });
 });
 
+// ─── Watch History Routes ───────────────────────────────────────────────────
+
+// GET /users/:userId/watch-history — Return full history for user
+app.get('/users/:userId/watch-history', (req, res) => {
+    const { userId } = req.params;
+    const history = loadHistory();
+    const userHistory = history[userId] || [];
+    return res.json(userHistory);
+});
+
+// PUT /users/:userId/watch-history/:tmdbId — Upsert a single entry
+app.put('/users/:userId/watch-history/:tmdbId', (req, res) => {
+    const { userId, tmdbId } = req.params;
+    const body = req.body;
+
+    const history = loadHistory();
+    if (!history[userId]) history[userId] = [];
+
+    // Build a unique key: tmdbId + season + episode (for TV)
+    const seasonNum = body.seasonNumber || body.season?.number || 0;
+    const episodeNum = body.episodeNumber || body.episode?.number || 0;
+    const entryKey = `${tmdbId}_${seasonNum}_${episodeNum}`;
+
+    const existingIdx = history[userId].findIndex(e => {
+        const eSeason = e.seasonNumber || e.season?.number || 0;
+        const eEpisode = e.episodeNumber || e.episode?.number || 0;
+        return e.tmdbId === String(tmdbId) && eSeason === seasonNum && eEpisode === episodeNum;
+    });
+
+    const entry = {
+        tmdbId: String(tmdbId),
+        duration: Number(body.duration || 0),
+        watched: Number(body.watched || 0),
+        watchedAt: body.watchedAt || new Date().toISOString(),
+        completed: body.completed || false,
+        seasonNumber: seasonNum || undefined,
+        episodeNumber: episodeNum || undefined,
+        meta: body.meta || {},
+        _key: entryKey
+    };
+
+    if (existingIdx >= 0) {
+        // Merge: only update if newer
+        const existing = history[userId][existingIdx];
+        if (entry.watched >= (existing.watched || 0)) {
+            history[userId][existingIdx] = { ...existing, ...entry };
+        }
+    } else {
+        history[userId].unshift(entry);
+    }
+
+    // Cap at 200 entries per user
+    if (history[userId].length > 200) {
+        history[userId] = history[userId].slice(0, 200);
+    }
+
+    historyCache = history;
+    saveHistory();
+
+    return res.json({ success: true, entry });
+});
+
+// DELETE /users/:userId/watch-history — Clear all history for user
+app.delete('/users/:userId/watch-history', (req, res) => {
+    const { userId } = req.params;
+    const history = loadHistory();
+    history[userId] = [];
+    historyCache = history;
+    saveHistory();
+    return res.json({ success: true });
+});
+
+// ─── Health & Root ──────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'online',
@@ -92,5 +210,7 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => {
+    ensureDataDir();
+    loadHistory();
     console.log(`Server listening on port ${PORT}`);
 });
