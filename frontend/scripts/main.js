@@ -262,7 +262,7 @@ async function renderHistory() {
         deleteBtn.innerHTML = '✕';
         deleteBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            Storage.history.remove(item.tmdbId, item.type, item.season, item.episode);
+            await SyncEngine.deleteHistoryItem(item.tmdbId, item.type, item.season, item.episode);
             await renderHistory();
         });
         el.appendChild(deleteBtn);

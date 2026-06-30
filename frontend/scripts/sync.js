@@ -113,7 +113,7 @@ window.SyncEngine = {
             
             if (response.ok) {
                 const data = await response.json();
-                if (Array.isArray(data) && data.length > 0) {
+                if (Array.isArray(data)) {
                     // Map backend entries to frontend format
                     const mappedData = data.map(item => ({
                         tmdbId: item.tmdbId,
@@ -128,36 +128,45 @@ window.SyncEngine = {
                         poster: item.meta?.poster || ''
                     }));
 
-                    // Merge with local: remote wins for same key if newer
-                    const localHistory = Storage.history.get();
-                    const mergedMap = {};
-
-                    // Add local entries first
-                    for (const item of localHistory) {
-                        const key = Storage.history.getKey(item);
-                        mergedMap[key] = item;
-                    }
-
-                    // Overwrite with remote entries if they have a more recent timestamp
-                    for (const item of mappedData) {
-                        const key = Storage.history.getKey(item);
-                        const existing = mergedMap[key];
-                        if (!existing || (item.last_updated || 0) >= (existing.last_updated || 0)) {
-                            mergedMap[key] = item;
-                        }
-                    }
-
-                    const mergedHistory = Object.values(mergedMap)
-                        .sort((a, b) => (b.last_updated || 0) - (a.last_updated || 0))
-                        .slice(0, 100);
-
-                    Storage.history.set(mergedHistory);
+                    // Set directly (overwrite) so that items deleted on other devices or backend stay deleted
+                    Storage.history.set(mappedData);
                     
                     window.dispatchEvent(new CustomEvent('sync_completed'));
                 }
             }
         } catch (e) {
             // Silently fail — local storage is the fallback
+        }
+    },
+    
+    deleteHistoryItem: async (tmdbId, type, season = 0, episode = 0) => {
+        // Local delete
+        Storage.history.remove(tmdbId, type, season, episode);
+        
+        // Broadcast local delete to other tabs
+        if (window.syncChannel) {
+            window.syncChannel.postMessage({
+                type: 'HISTORY_UPDATED'
+            });
+        }
+
+        // Remote delete
+        if (isOnline()) {
+            try {
+                const url = new URL(`${SyncEngine.apiUrl}/users/${SyncEngine.userId}/watch-history/${tmdbId}`);
+                if (season) url.searchParams.set('season', season);
+                if (episode) url.searchParams.set('episode', episode);
+                
+                await fetchWithTimeout(
+                    url.toString(),
+                    {
+                        method: 'DELETE'
+                    },
+                    5000
+                );
+            } catch (e) {
+                console.error('Failed to delete specific remote history item:', e);
+            }
         }
     },
     

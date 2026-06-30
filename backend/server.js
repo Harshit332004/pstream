@@ -186,6 +186,27 @@ app.put('/users/:userId/watch-history/:tmdbId', (req, res) => {
     return res.json({ success: true, entry });
 });
 
+// DELETE /users/:userId/watch-history/:tmdbId — Delete a single history entry
+app.delete('/users/:userId/watch-history/:tmdbId', (req, res) => {
+    const { userId, tmdbId } = req.params;
+    const season = req.query.season ? parseInt(req.query.season) : 0;
+    const episode = req.query.episode ? parseInt(req.query.episode) : 0;
+
+    const history = loadHistory();
+    if (history[userId]) {
+        history[userId] = history[userId].filter(e => {
+            const eSeason = e.seasonNumber || e.season?.number || 0;
+            const eEpisode = e.episodeNumber || e.episode?.number || 0;
+            const isMatch = e.tmdbId === String(tmdbId) && eSeason === season && eEpisode === episode;
+            return !isMatch;
+        });
+        historyCache = history;
+        saveHistory();
+    }
+
+    return res.json({ success: true });
+});
+
 // DELETE /users/:userId/watch-history — Clear all history for user
 app.delete('/users/:userId/watch-history', (req, res) => {
     const { userId } = req.params;
