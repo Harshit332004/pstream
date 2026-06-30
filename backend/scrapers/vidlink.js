@@ -44,18 +44,33 @@ export async function scrapeVidlink(id, type, season, episode) {
         ? `https://vidlink.pro/api/b/tv/${token}/${season}/${episode || 1}?multiLang=1`
         : `https://vidlink.pro/api/b/movie/${token}?multiLang=1`;
 
-    const res = await axios.get(apiUrl, {
-        headers: { 
-            Referer: REFERER, 
-            Origin: ORIGIN, 
-            'User-Agent': UA,
-            'X-Forwarded-For': '172.56.21.89', // Spoof US residential IP
-            'X-Real-IP': '172.56.21.89'
+    let res = null;
+    const attempts = 3;
+    for (let i = 0; i < attempts; i++) {
+        try {
+            res = await axios.get(apiUrl, {
+                headers: { 
+                    Referer: REFERER, 
+                    Origin: ORIGIN, 
+                    'User-Agent': UA,
+                    'X-Forwarded-For': '172.56.21.89', // Spoof US residential IP
+                    'X-Real-IP': '172.56.21.89'
+                },
+                timeout: 5000 // 5 seconds request timeout
+            });
+            if (res.status === 200 && res.data && res.data.stream) {
+                break; // success!
+            }
+        } catch (err) {
+            console.warn(`[VidLink Warning] Attempt ${i + 1} failed: ${err.message}`);
         }
-    });
+        if (i < attempts - 1) {
+            await new Promise(r => setTimeout(r, 1000)); // wait 1s before retry
+        }
+    }
 
-    if (res.status !== 200 || !res.data) {
-        throw new Error(`VidLink API returned status: ${res.status}`);
+    if (!res || res.status !== 200 || !res.data) {
+        throw new Error(`VidLink API returned status: ${res ? res.status : 'failed'}`);
     }
 
     const streamData = res.data.stream;
