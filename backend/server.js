@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { LRUCache } from 'lru-cache';
 import { scrapeVidlink } from './scrapers/vidlink.js';
+import { scrapeVidsrc } from './scrapers/vidsrc.js';
 
 const app = express();
 const PORT = process.env.PORT || 7860;
@@ -88,14 +89,16 @@ app.get('/api/stream', async (req, res) => {
         return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
     };
 
-    console.log(`-> Fetching from VidLink...`);
+    console.log(`-> Fetching from VidLink and VidSrc.cc...`);
     const results = await Promise.allSettled([
-        withTimeout(scrapeVidlink(id, type, season, episode), 15000)
+        withTimeout(scrapeVidlink(id, type, season, episode), 15000),
+        withTimeout(scrapeVidsrc(id, type, season, episode), 20000)
     ]);
 
     const streams = [];
     const subtitles = [];
 
+    // Process VidLink (first priority)
     if (results[0].status === 'fulfilled' && results[0].value.success) {
         const vidlinkStreams = results[0].value.streams || [];
         for (const s of vidlinkStreams) {
@@ -112,7 +115,27 @@ app.get('/api/stream', async (req, res) => {
         }
         if (results[0].value.subtitles) subtitles.push(...results[0].value.subtitles);
     } else {
-        console.error(`-> VidLink FAILED: ${results[0].reason?.message || 'Unknown'}`);
+        console.error(`-> VidLink FAILED: ${results[0].reason?.message || (results[0].value && results[0].value.error) || 'Unknown'}`);
+    }
+
+    // Process VidSrc.cc (second priority)
+    if (results[1].status === 'fulfilled' && results[1].value.success) {
+        const vidsrcStreams = results[1].value.streams || [];
+        for (const s of vidsrcStreams) {
+            let streamUrl = s.url;
+            if (streamUrl && streamUrl.startsWith('http://') && !streamUrl.includes('localhost')) {
+                streamUrl = streamUrl.replace('http://', 'https://');
+            }
+            streams.push({ 
+                provider: s.provider || 'VidSrc.cc', 
+                url: streamUrl, 
+                type: s.type || 'mp4',
+                quality: s.quality || 'Auto'
+            });
+        }
+        if (results[1].value.subtitles) subtitles.push(...results[1].value.subtitles);
+    } else {
+        console.error(`-> VidSrc.cc FAILED: ${results[1].reason?.message || (results[1].value && results[1].value.error) || 'Unknown'}`);
     }
 
     if (streams.length > 0) {
@@ -221,7 +244,7 @@ app.delete('/users/:userId/watch-history', (req, res) => {
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'online',
-        scrapers: ['vidlink'],
+        scrapers: ['vidlink', 'vidsrc'],
         timestamp: Date.now()
     });
 });
