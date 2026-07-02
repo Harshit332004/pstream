@@ -49,26 +49,23 @@ window.Player = {
         Player.videoElement.addEventListener('loadedmetadata', () => Player.onLoadedMetadata());
         Player.videoElement.addEventListener('error', () => Player.onError());
         
-        // Click on player wrapper = toggle HUD (NOT play/pause)
-        const wrapper = DOM.get('player-wrapper');
-        wrapper.addEventListener('click', (e) => {
-            // Ignore clicks on bottom controls, settings panel, and overlay skip buttons
-            if (e.target.closest('.custom-player-controls') || 
-                e.target.closest('.settings-panel') || 
-                e.target.closest('.btn-overlay-skip')) {
-                return;
-            }
-            
-            // If settings panel is open, close it first
-            if (Player.isSettingsOpen) {
-                Player.toggleSettings(false);
-                return;
-            }
-            
+        // Click on blank area (the transparent overlay) = toggle HUD
+        // The overlay sits above the video (z-index 1) but below all buttons (z-index 8-9).
+        // When HUD is hidden, center controls have pointer-events:none so clicks land here.
+        // When HUD is visible, clicking around the buttons lands here too.
+        DOM.get('video-click-overlay').addEventListener('click', (e) => {
+            e.preventDefault();
             e.stopPropagation();
             Player.toggleHUD();
         });
 
+        // Center overlay play/pause toggles playback
+        DOM.get('overlay-play-pause').addEventListener('click', (e) => {
+            e.stopPropagation();
+            Player.togglePlay();
+        });
+
+        // Bottom bar play button toggles playback
         DOM.get('custom-play-btn').addEventListener('click', (e) => {
             e.stopPropagation();
             Player.togglePlay();
@@ -107,7 +104,8 @@ window.Player = {
         // Fullscreen
         DOM.get('custom-fullscreen-btn').addEventListener('click', (e) => { e.stopPropagation(); Player.toggleFullscreen(); });
         
-        // Auto-hide controls triggers
+        // Auto-hide controls triggers (desktop mouse)
+        const wrapper = DOM.get('player-wrapper');
         wrapper.addEventListener('mousemove', () => Player.showControlsTemporarily());
         wrapper.addEventListener('mouseleave', () => Player.hideControlsImmediately());
         
