@@ -104,10 +104,16 @@ window.Player = {
         // Fullscreen
         DOM.get('custom-fullscreen-btn').addEventListener('click', (e) => { e.stopPropagation(); Player.toggleFullscreen(); });
         
-        // Auto-hide controls triggers (desktop mouse)
+        // Auto-hide controls triggers (desktop mouse only, ignore synthetic touch events)
         const wrapper = DOM.get('player-wrapper');
-        wrapper.addEventListener('mousemove', () => Player.showControlsTemporarily());
-        wrapper.addEventListener('mouseleave', () => Player.hideControlsImmediately());
+        let lastTouchTime = 0;
+        wrapper.addEventListener('touchstart', () => { lastTouchTime = Date.now(); }, { passive: true });
+        wrapper.addEventListener('mousemove', () => {
+            if (Date.now() - lastTouchTime > 500) Player.showControlsTemporarily();
+        });
+        wrapper.addEventListener('mouseleave', () => {
+            if (Date.now() - lastTouchTime > 500) Player.hideControlsImmediately();
+        });
         
         // Keyboard controls
         document.addEventListener('keydown', (e) => Player.handleKeyboard(e));
@@ -361,19 +367,28 @@ window.Player = {
 
     toggleHUD: () => {
         const wrapper = DOM.get('player-wrapper');
+        // Clear any existing auto-hide timer
+        if (Player.controlsTimeout) {
+            clearTimeout(Player.controlsTimeout);
+            Player.controlsTimeout = null;
+        }
         if (Player.isHUDVisible) {
             // Hide HUD
             wrapper.classList.add('player-controls-hidden');
             Player.isHUDVisible = false;
-            if (Player.controlsTimeout) {
-                clearTimeout(Player.controlsTimeout);
-                Player.controlsTimeout = null;
-            }
         } else {
             // Show HUD
             wrapper.classList.remove('player-controls-hidden');
             Player.isHUDVisible = true;
-            Player.showControlsTemporarily();
+            // Auto-hide after 3s if video is playing
+            if (!Player.videoElement.paused && !Player.isSettingsOpen) {
+                Player.controlsTimeout = setTimeout(() => {
+                    if (!Player.videoElement.paused && !Player.isSettingsOpen) {
+                        wrapper.classList.add('player-controls-hidden');
+                        Player.isHUDVisible = false;
+                    }
+                }, 3000);
+            }
         }
     },
     
