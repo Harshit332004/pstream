@@ -170,6 +170,14 @@
     display: block;
 }
 
+.video-click-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: transparent;
+    cursor: pointer;
+}
+
 /* Player Loader */
 .player-loader {
     position: absolute;
