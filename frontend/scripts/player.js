@@ -49,17 +49,26 @@ window.Player = {
         Player.videoElement.addEventListener('loadedmetadata', () => Player.onLoadedMetadata());
         Player.videoElement.addEventListener('error', () => Player.onError());
         
-        // Click on video = toggle HUD (NOT play/pause)
-        Player.videoElement.addEventListener('click', (e) => {
+        // Click on player wrapper = toggle HUD (NOT play/pause)
+        const wrapper = DOM.get('player-wrapper');
+        wrapper.addEventListener('click', (e) => {
+            // Ignore clicks on bottom controls, settings panel, and overlay skip buttons
+            if (e.target.closest('.custom-player-controls') || 
+                e.target.closest('.settings-panel') || 
+                e.target.closest('.btn-overlay-skip')) {
+                return;
+            }
+            
+            // If settings panel is open, close it first
+            if (Player.isSettingsOpen) {
+                Player.toggleSettings(false);
+                return;
+            }
+            
             e.stopPropagation();
             Player.toggleHUD();
         });
 
-        // Center overlay play/pause still toggles play
-        DOM.get('overlay-play-pause').addEventListener('click', (e) => {
-            e.stopPropagation();
-            Player.togglePlay();
-        });
         DOM.get('custom-play-btn').addEventListener('click', (e) => {
             e.stopPropagation();
             Player.togglePlay();
@@ -99,7 +108,6 @@ window.Player = {
         DOM.get('custom-fullscreen-btn').addEventListener('click', (e) => { e.stopPropagation(); Player.toggleFullscreen(); });
         
         // Auto-hide controls triggers
-        const wrapper = DOM.get('player-wrapper');
         wrapper.addEventListener('mousemove', () => Player.showControlsTemporarily());
         wrapper.addEventListener('mouseleave', () => Player.hideControlsImmediately());
         
