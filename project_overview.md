@@ -400,13 +400,3 @@ NODE_ENV="production"
         npm run dev
         ```
 
-### Building the Desktop Application (Tauri):
-1.  Navigate to the frontend workspace:
-    ```bash
-    cd frontend
-    ```
-2.  Compile the desktop client for your target platform (macOS/Windows/Linux):
-    ```bash
-    npm run tauri build
-    ```
-    *The binary installer package will be outputted under `frontend/src-tauri/target/release/bundle/`.*
