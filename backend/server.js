@@ -1,5 +1,4 @@
 import express from 'express';
-import axios from 'axios';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
@@ -169,102 +168,6 @@ app.get('/api/stream', async (req, res) => {
 
     return res.status(500).json({ success: false, error: 'Failed to resolve stream' });
 });
-
-// ─── Stream Proxy ───────────────────────────────────────────────────────────
-app.get('/api/proxy', async (req, res) => {
-    try {
-        const targetUrl = req.query.url;
-        if (!targetUrl) return res.status(400).send('Missing url parameter');
-
-        let proxyHeaders = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Connection': 'keep-alive'
-        };
-        
-        if (req.query.proxyHeaders) {
-            try {
-                const parsedHeaders = JSON.parse(Buffer.from(req.query.proxyHeaders, 'base64').toString('utf8'));
-                proxyHeaders = { ...proxyHeaders, ...parsedHeaders };
-            } catch (e) {
-                console.error('[Proxy] Failed to parse proxyHeaders:', e.message);
-            }
-        }
-
-        // Forward Range header for scrubbing support in MP4s
-        if (req.headers.range) {
-            proxyHeaders['Range'] = req.headers.range;
-        }
-
-        const isM3U8 = targetUrl.includes('.m3u8');
-        
-        if (isM3U8) {
-            const { gotScraping } = await import('got-scraping');
-            const response = await gotScraping.get(targetUrl, {
-                headers: proxyHeaders,
-                throwHttpErrors: false
-            });
-
-            // Copy upstream headers to response
-            const headersToOmit = ['host', 'connection', 'access-control-allow-origin', 'content-length', 'content-encoding'];
-            for (const [key, value] of Object.entries(response.headers)) {
-                if (!headersToOmit.includes(key.toLowerCase())) {
-                    res.setHeader(key, value);
-                }
-            }
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            res.status(response.statusCode);
-
-            // Rewrite inner URLs to be absolute so they don't break when fetched from our proxy origin
-            const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
-            const rewritten = response.body.split('\n').map(line => {
-                const tLine = line.trim();
-                if (tLine && !tLine.startsWith('#')) {
-                    if (tLine.startsWith('http://') || tLine.startsWith('https://')) {
-                        return tLine; // Already absolute
-                    } else if (tLine.startsWith('/')) {
-                        const parsedTarget = new URL(targetUrl);
-                        return `${parsedTarget.protocol}//${parsedTarget.host}${tLine}`;
-                    } else {
-                        return `${baseUrl}${tLine}`;
-                    }
-                }
-                return line;
-            }).join('\n');
-            
-            return res.send(rewritten);
-        } else {
-            const { gotScraping } = await import('got-scraping');
-            const stream = gotScraping.stream(targetUrl, {
-                headers: proxyHeaders,
-                isStream: true
-            });
-
-            stream.on('response', (response) => {
-                const headersToOmit = ['host', 'connection', 'access-control-allow-origin'];
-                for (const [key, value] of Object.entries(response.headers)) {
-                    if (!headersToOmit.includes(key.toLowerCase())) {
-                        res.setHeader(key, value);
-                    }
-                }
-                res.setHeader('Access-Control-Allow-Origin', '*');
-                res.status(response.statusCode);
-            });
-
-            stream.on('error', (err) => {
-                console.error(`[Proxy] Stream error for ${targetUrl}:`, err.message);
-                if (!res.headersSent) res.status(500).send('Proxy stream error');
-            });
-
-            stream.pipe(res);
-        }
-    } catch (error) {
-        console.error(`[Proxy] Error fetching ${req.query.url}:`, error.message);
-        if (!res.headersSent) res.status(500).send('Proxy error');
-    }
-});
-
 
 // ─── Watch History Routes ───────────────────────────────────────────────────
 

@@ -12,7 +12,6 @@
     "axios": "^1.7.2",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "got-scraping": "^4.2.1",
     "libsodium-wrappers": "^0.7.16",
     "lru-cache": "^10.2.2"
   }
