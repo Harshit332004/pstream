@@ -1,42 +1,20 @@
-import fs from 'fs';
-import path from 'path';
-import crypto from 'crypto';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const webcrypto = crypto.webcrypto;
+"use strict";
+const fs  = require("fs");
+const path = require("path");
+const { webcrypto } = require("crypto");
 
 const CONFIG = {
-  wasmFile: "videasy.wasm",
+  wasmFile: "module1.wasm",
   hostname: "vidking.net",
 };
 
-const API_BASE = "https://api.videasy.to";
-const ORIGIN = "https://www.vidking.net";
-const REFERER = "https://www.vidking.net/";
-
-const PROVIDERS = [
-  { name: "Oxygen",   endpoint: "mb-flix",      active: true },
-  { name: "Hydrogen", endpoint: "cdn",           active: true },
-  { name: "Lithium",  endpoint: "downloader2",   active: true },
-  { name: "Helium",   endpoint: "1movies",       active: false },
-];
-
-const HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
-  "Referer": REFERER,
-  "Origin": ORIGIN,
-};
-
-// ─── MD5 (pure JS, no dependencies) ──────────────────────────────────────────
 function md5(data) {
   const len  = data.length;
   const pad  = len + 1 + ((len + 1) % 64 < 56 ? 56 - ((len + 1) % 64) : 120 - ((len + 1) % 64)) + 8;
   const buf  = new Uint8Array(pad);
   buf.set(data);
   buf[len] = 0x80;
-  const dv = new DataView(buf.buffer);
+  const dv  = new DataView(buf.buffer);
   dv.setUint32(pad - 8, (len * 8) & 0xffffffff, true);
   dv.setUint32(pad - 4, 0, true);
   let a = 0x67452301, b = 0xefcdab89, c = 0x98badcfe, d = 0x10325476;
@@ -63,26 +41,21 @@ function md5(data) {
   return out;
 }
 
-// ─── OpenSSL EVP key derivation ──────────────────────────────────────────────
 function evpBytesToKey(salt, password = "", keySize = 32, ivSize = 16) {
   const pw = new TextEncoder().encode(password);
   let hash = new Uint8Array(0);
   let derived = new Uint8Array(0);
   while (derived.length < keySize + ivSize) {
     const input = new Uint8Array(hash.length + pw.length + salt.length);
-    input.set(hash);
-    input.set(pw, hash.length);
-    input.set(salt, hash.length + pw.length);
+    input.set(hash); input.set(pw, hash.length); input.set(salt, hash.length + pw.length);
     hash = md5(input);
     const tmp = new Uint8Array(derived.length + hash.length);
-    tmp.set(derived);
-    tmp.set(hash, derived.length);
+    tmp.set(derived); tmp.set(hash, derived.length);
     derived = tmp;
   }
   return { key: derived.slice(0, keySize), iv: derived.slice(keySize, keySize + ivSize) };
 }
 
-// ─── AES-256-CBC decrypt (OpenSSL "Salted__" format) ─────────────────────────
 async function aesDecrypt(base64Data) {
   const bin = atob(base64Data);
   const raw = Uint8Array.from(bin, c => c.charCodeAt(0));
@@ -96,7 +69,6 @@ async function aesDecrypt(base64Data) {
   return new TextDecoder().decode(pt);
 }
 
-// ─── PoW patch for WASM serve() output ───────────────────────────────────────
 function patchPow(code) {
   const primary = code.replace(/_0x24\(\),_0x36\(/g, "_0x36(");
   if (primary !== code) return primary;
@@ -105,7 +77,6 @@ function patchPow(code) {
   return code.slice(0, cutoff) + tail;
 }
 
-// ─── WASM loader (cached) ────────────────────────────────────────────────────
 let _wasmModule = null;
 
 async function loadWasm() {
@@ -143,7 +114,6 @@ async function loadWasm() {
   return _wasmModule;
 }
 
-// ─── Hash computation (cached) ───────────────────────────────────────────────
 let _cachedHash = null;
 
 async function getHash(wasm) {
@@ -164,7 +134,6 @@ async function getHash(wasm) {
   return hash;
 }
 
-// ─── Full decrypt pipeline: WASM decrypt → AES decrypt → JSON ────────────────
 async function decrypt(ciphertextHex, tmdbId) {
   const wasm = await loadWasm();
   const hash = await getHash(wasm);
@@ -175,73 +144,11 @@ async function decrypt(ciphertextHex, tmdbId) {
   return JSON.parse(plaintext);
 }
 
-// ─── Exported scraper function ───────────────────────────────────────────────
-export async function scrapeVideasy(id, type, season, episode) {
-  try {
-    const queryParams = new URLSearchParams({
-      mediaType: type === 'tv' || type === 'show' ? 'tv' : 'movie',
-      tmdbId: String(id),
-      title: "",
-      year: "",
-      seasonId: String(season || "1"),
-      episodeId: String(episode || "1"),
-      imdbId: ""
-    });
-
-    const activeProviders = PROVIDERS.filter(p => p.active);
-    const errors = [];
-
-    for (const p of activeProviders) {
-      try {
-        const url = `${API_BASE}/${p.endpoint}/sources-with-title?${queryParams.toString()}`;
-        console.log(`[Videasy] Trying provider ${p.name}: ${url}`);
-        
-        const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(15000) });
-        if (!res.ok) {
-          errors.push(`${p.name}: HTTP ${res.status}`);
-          continue;
-        }
-        
-        const cipher = (await res.text()).trim();
-        if (!cipher) {
-          errors.push(`${p.name}: empty response`);
-          continue;
-        }
-
-        console.log(`[Videasy] Got cipher from ${p.name} (${cipher.length} chars), decrypting...`);
-        const data = await decrypt(cipher, id);
-        
-        if (data && data.sources && data.sources.length > 0) {
-          console.log(`[Videasy] ✓ Decrypted ${data.sources.length} source(s) from ${p.name}`);
-          return {
-            success: true,
-            streams: data.sources.map(s => ({
-              provider: `Videasy (${p.name})`,
-              url: s.url || s.file,
-              type: s.url?.includes('.m3u8') ? 'hls' : (s.type || 'hls'),
-              quality: s.quality || 'Auto'
-            })),
-            subtitles: (data.subtitles || data.tracks || [])
-              .filter(t => {
-                const lang = (t.label || t.language || '').toLowerCase();
-                return lang === 'english' || lang === 'en' || lang === 'eng';
-              })
-              .map(t => ({
-                language: t.label || t.language || 'English',
-                url: t.url || t.file
-              }))
-          };
-        } else {
-          errors.push(`${p.name}: decrypted but no sources found`);
-        }
-      } catch (err) {
-        console.warn(`[Videasy] ${p.name} failed: ${err.message}`);
-        errors.push(`${p.name}: ${err.message}`);
-      }
-    }
-
-    return { success: false, error: `Videasy: All providers failed — ${errors.join('; ')}` };
-  } catch (error) {
-    return { success: false, error: `Videasy Scraper Error: ${error.message}` };
-  }
+if (require.main === module) {
+  const [,, ciphertextHex, tmdbId] = process.argv;
+  decrypt(ciphertextHex, tmdbId)
+    .then(data  => console.log(JSON.stringify({ success: true,  data  })))
+    .catch(err  => console.log(JSON.stringify({ success: false, error: err.message })));
 }
+
+module.exports = { decrypt };

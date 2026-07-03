@@ -1,27 +1,16 @@
-FROM node:20-alpine
-
+FROM node:20-alpine AS build
 WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN apk add --no-cache python3 make g++
+RUN npm ci
+COPY . .
+RUN npm run build
 
-# Install main backend dependencies
-COPY package*.json ./
-RUN npm ci --omit=dev
-
-# Copy application source code
-COPY server.js ./
-COPY scrapers/ ./scrapers/
-
-# Create persistent data directory for watch history
-RUN mkdir -p /data
-
-# Create a non-root user (appuser) and set ownership
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-RUN chown -R appuser:appgroup /app /data
-
-# Switch to the non-root user
-USER appuser
-
-# Expose port required by Hugging Face Spaces
-EXPOSE 7860
-
-# Start the application
-CMD ["npm", "start"]
+FROM node:20-alpine AS run
+WORKDIR /app
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY package.json ./
+ENV NODE_ENV=production
+EXPOSE 3000
+CMD ["node", "dist/index.js"]
