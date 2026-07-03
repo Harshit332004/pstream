@@ -52,9 +52,7 @@ export async function scrapeVidlink(id, type, season, episode) {
                 headers: { 
                     Referer: REFERER, 
                     Origin: ORIGIN, 
-                    'User-Agent': UA,
-                    'X-Forwarded-For': '172.56.21.89', // Spoof US residential IP
-                    'X-Real-IP': '172.56.21.89'
+                    'User-Agent': UA
                 },
                 timeout: 5000 // 5 seconds request timeout
             });

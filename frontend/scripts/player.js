@@ -191,8 +191,22 @@ window.Player = {
             }
             Player.currentSources = Object.values(providerMap);
 
-            // Find the index of the selected source within allQualities
-            const selectedSource = Player.currentSources[0];
+            // Find the highest quality source overall (prioritizing VidLink if qualities are equal)
+            let selectedSource = Player.currentSources[0];
+            let maxQuality = 0;
+            for (const src of Player.currentSources) {
+                const q = parseInt(src.quality) || 0;
+                if (q > maxQuality) {
+                    maxQuality = q;
+                    selectedSource = src;
+                } else if (q === maxQuality && maxQuality > 0) {
+                    // Prioritize VidLink if quality is equal
+                    if (src.provider && src.provider.toLowerCase().includes('vidlink')) {
+                        selectedSource = src;
+                    }
+                }
+            }
+
             Player.currentQualityIndex = Player.allQualities.findIndex(
                 q => q.url === selectedSource.url
             );

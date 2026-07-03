@@ -5,6 +5,8 @@ import path from 'path';
 import { LRUCache } from 'lru-cache';
 import { scrapeVidlink } from './scrapers/vidlink.js';
 import { scrapeVidsrc } from './scrapers/vidsrc.js';
+import { scrapeVidsrccc } from './scrapers/vidsrccc.js';
+import { scrapeVideasy } from './scrapers/videasy.js';
 
 const app = express();
 const PORT = process.env.PORT || 7860;
@@ -89,10 +91,12 @@ app.get('/api/stream', async (req, res) => {
         return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
     };
 
-    console.log(`-> Fetching from VidLink and VidSrc.cc...`);
+    console.log(`-> Fetching from VidLink, VidSrc, Vidsrc.cc, and Videasy...`);
     const results = await Promise.allSettled([
         withTimeout(scrapeVidlink(id, type, season, episode), 15000),
-        withTimeout(scrapeVidsrc(id, type, season, episode), 20000)
+        withTimeout(scrapeVidsrc(id, type, season, episode), 20000),
+        withTimeout(scrapeVidsrccc(id, type, season, episode), 20000),
+        withTimeout(scrapeVideasy(id, type, season, episode), 20000)
     ]);
 
     const streams = [];
@@ -118,7 +122,7 @@ app.get('/api/stream', async (req, res) => {
         console.error(`-> VidLink FAILED: ${results[0].reason?.message || (results[0].value && results[0].value.error) || 'Unknown'}`);
     }
 
-    // Process VidSrc.cc (second priority)
+    // Process VidSrc (second priority)
     if (results[1].status === 'fulfilled' && results[1].value.success) {
         const vidsrcStreams = results[1].value.streams || [];
         for (const s of vidsrcStreams) {
@@ -127,7 +131,7 @@ app.get('/api/stream', async (req, res) => {
                 streamUrl = streamUrl.replace('http://', 'https://');
             }
             streams.push({ 
-                provider: s.provider || 'VidSrc.cc', 
+                provider: s.provider || 'VidSrc', 
                 url: streamUrl, 
                 type: s.type || 'mp4',
                 quality: s.quality || 'Auto'
@@ -135,7 +139,47 @@ app.get('/api/stream', async (req, res) => {
         }
         if (results[1].value.subtitles) subtitles.push(...results[1].value.subtitles);
     } else {
-        console.error(`-> VidSrc.cc FAILED: ${results[1].reason?.message || (results[1].value && results[1].value.error) || 'Unknown'}`);
+        console.error(`-> VidSrc FAILED: ${results[1].reason?.message || (results[1].value && results[1].value.error) || 'Unknown'}`);
+    }
+
+    // Process Vidsrc.cc Decryptor (third priority)
+    if (results[2].status === 'fulfilled' && results[2].value.success) {
+        const vidsrcccStreams = results[2].value.streams || [];
+        for (const s of vidsrcccStreams) {
+            let streamUrl = s.url;
+            if (streamUrl && streamUrl.startsWith('http://') && !streamUrl.includes('localhost')) {
+                streamUrl = streamUrl.replace('http://', 'https://');
+            }
+            streams.push({ 
+                provider: s.provider || 'Vidsrc.cc (Decryptor)', 
+                url: streamUrl, 
+                type: s.type || 'mp4',
+                quality: s.quality || 'Auto'
+            });
+        }
+        if (results[2].value.subtitles) subtitles.push(...results[2].value.subtitles);
+    } else {
+        console.error(`-> Vidsrc.cc FAILED: ${results[2].reason?.message || (results[2].value && results[2].value.error) || 'Unknown'}`);
+    }
+
+    // Process Videasy Decryptor (fourth priority)
+    if (results[3].status === 'fulfilled' && results[3].value.success) {
+        const videasyStreams = results[3].value.streams || [];
+        for (const s of videasyStreams) {
+            let streamUrl = s.url;
+            if (streamUrl && streamUrl.startsWith('http://') && !streamUrl.includes('localhost')) {
+                streamUrl = streamUrl.replace('http://', 'https://');
+            }
+            streams.push({ 
+                provider: s.provider || 'Videasy (Decryptor)', 
+                url: streamUrl, 
+                type: s.type || 'mp4',
+                quality: s.quality || 'Auto'
+            });
+        }
+        if (results[3].value.subtitles) subtitles.push(...results[3].value.subtitles);
+    } else {
+        console.error(`-> Videasy FAILED: ${results[3].reason?.message || (results[3].value && results[3].value.error) || 'Unknown'}`);
     }
 
     if (streams.length > 0) {
@@ -149,7 +193,6 @@ app.get('/api/stream', async (req, res) => {
 
 // ─── Watch History Routes ───────────────────────────────────────────────────
 
-// GET /users/:userId/watch-history — Return full history for user
 app.get('/users/:userId/watch-history', (req, res) => {
     const { userId } = req.params;
     const history = loadHistory();
@@ -157,7 +200,6 @@ app.get('/users/:userId/watch-history', (req, res) => {
     return res.json(userHistory);
 });
 
-// PUT /users/:userId/watch-history/:tmdbId — Upsert a single entry
 app.put('/users/:userId/watch-history/:tmdbId', (req, res) => {
     const { userId, tmdbId } = req.params;
     const body = req.body;
@@ -165,7 +207,6 @@ app.put('/users/:userId/watch-history/:tmdbId', (req, res) => {
     const history = loadHistory();
     if (!history[userId]) history[userId] = [];
 
-    // Build a unique key: tmdbId + season + episode (for TV)
     const seasonNum = body.seasonNumber || body.season?.number || 0;
     const episodeNum = body.episodeNumber || body.episode?.number || 0;
     const entryKey = `${tmdbId}_${seasonNum}_${episodeNum}`;
@@ -189,7 +230,6 @@ app.put('/users/:userId/watch-history/:tmdbId', (req, res) => {
     };
 
     if (existingIdx >= 0) {
-        // Merge: only update if newer
         const existing = history[userId][existingIdx];
         if (entry.watched >= (existing.watched || 0)) {
             history[userId][existingIdx] = { ...existing, ...entry };
@@ -198,7 +238,6 @@ app.put('/users/:userId/watch-history/:tmdbId', (req, res) => {
         history[userId].unshift(entry);
     }
 
-    // Cap at 200 entries per user
     if (history[userId].length > 200) {
         history[userId] = history[userId].slice(0, 200);
     }
@@ -209,7 +248,6 @@ app.put('/users/:userId/watch-history/:tmdbId', (req, res) => {
     return res.json({ success: true, entry });
 });
 
-// DELETE /users/:userId/watch-history/:tmdbId — Delete a single history entry
 app.delete('/users/:userId/watch-history/:tmdbId', (req, res) => {
     const { userId, tmdbId } = req.params;
     const season = req.query.season ? parseInt(req.query.season) : 0;
@@ -230,7 +268,6 @@ app.delete('/users/:userId/watch-history/:tmdbId', (req, res) => {
     return res.json({ success: true });
 });
 
-// DELETE /users/:userId/watch-history — Clear all history for user
 app.delete('/users/:userId/watch-history', (req, res) => {
     const { userId } = req.params;
     const history = loadHistory();
@@ -244,13 +281,13 @@ app.delete('/users/:userId/watch-history', (req, res) => {
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'online',
-        scrapers: ['vidlink', 'vidsrc'],
+        scrapers: ['vidlink', 'vidsrc', 'vidsrccc', 'videasy'],
         timestamp: Date.now()
     });
 });
 
 app.get('/', (req, res) => {
-    res.send('P-Stream HF Backend is Running (VidLink Scraper Only)');
+    res.send('P-Stream HF Backend is Running (VidLink, VidSrc, Vidsrc.cc, Videasy)');
 });
 
 app.listen(PORT, () => {
