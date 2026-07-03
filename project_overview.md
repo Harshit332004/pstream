@@ -1,6 +1,6 @@
 # 🎬 SafeStream V2 — Complete Project Overview & Architecture
 
-SafeStream V2 is a high-performance, low-end optimized, self-hosted movie and TV show streaming ecosystem. It integrates a server-side scraping engine, a secure bypass proxy, user synchronization, real-time telemetry, and a multi-platform client frontend that can be deployed as an SPA web app or built as a native desktop application using **Tauri**.
+SafeStream V2 is a high-performance, low-end optimized, self-hosted movie and TV show streaming ecosystem. It integrates a server-side scraping engine, a secure bypass proxy, user synchronization, real-time telemetry, and a web client frontend that can be deployed as an SPA web app.
 
 ---
 
