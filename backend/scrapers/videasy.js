@@ -222,9 +222,12 @@ export async function scrapeVideasy(id, type, season, episode) {
               quality: s.quality || 'Auto'
             })),
             subtitles: (data.subtitles || data.tracks || [])
-              .filter(t => t.kind === 'captions' || t.url || t.file)
+              .filter(t => {
+                const lang = (t.label || t.language || '').toLowerCase();
+                return lang === 'english' || lang === 'en' || lang === 'eng';
+              })
               .map(t => ({
-                language: t.label || t.language || 'Unknown',
+                language: t.label || t.language || 'English',
                 url: t.url || t.file
               }))
           };
