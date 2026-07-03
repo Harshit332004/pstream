@@ -961,6 +961,7 @@ window.Player = {
             path = path.replace(/%2F/gi, '/').replace(/%2B/gi, '+').replace(/%3D/gi, '=');
         }
         
+        let proxyHeadersParam = '';
         if (parts.length > 1) {
             try {
                 const queryParams = new URLSearchParams(parts[1]);
@@ -976,16 +977,18 @@ window.Player = {
                     headersJson['User-Agent'] = scraperUA;
                     headersJson['user-agent'] = scraperUA;
                     
-                    queryParams.set('proxyHeaders', btoa(JSON.stringify(headersJson)));
+                    proxyHeadersParam = `&proxyHeaders=${btoa(JSON.stringify(headersJson))}`;
                     queryParams.delete('headers');
                 }
-                return `${path}?${queryParams.toString()}`;
+                path = `${path}?${queryParams.toString()}`;
             } catch (e) {
                 console.error('Failed to parse query params in sanitizeStreamUrl:', e);
+                path = `${path}?${parts.slice(1).join('?')}`;
             }
         }
         
-        return parts.length > 1 ? `${path}?${parts.slice(1).join('?')}` : path;
+        const apiUrl = import.meta.env.VITE_HF_API_URL || 'http://localhost:7860';
+        return `${apiUrl}/api/proxy?url=${encodeURIComponent(path)}${proxyHeadersParam}`;
     },
     
     startLoadTimeout: () => {
