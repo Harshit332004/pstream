@@ -36,11 +36,11 @@ window.Player = {
     isFallbackTriggered: false,
     loadTimeout: null,
     currentSpeed: 1.0,
-    
+
     init: () => {
         Player.videoElement = DOM.get('video-player');
         if (!Player.videoElement) return;
-        
+
         // Video event listeners
         Player.videoElement.addEventListener('timeupdate', () => Player.onTimeUpdate());
         Player.videoElement.addEventListener('play', () => Player.onPlayStateChange(true));
@@ -48,7 +48,7 @@ window.Player = {
         Player.videoElement.addEventListener('ended', () => Player.onEnded());
         Player.videoElement.addEventListener('loadedmetadata', () => Player.onLoadedMetadata());
         Player.videoElement.addEventListener('error', () => Player.onError());
-        
+
         // Click on blank area (the transparent overlay) = toggle HUD
         // The overlay sits above the video (z-index 1) but below all buttons (z-index 8-9).
         // When HUD is hidden, center controls have pointer-events:none so clicks land here.
@@ -70,40 +70,40 @@ window.Player = {
             e.stopPropagation();
             Player.togglePlay();
         });
-        
+
         // Skip buttons
         DOM.get('overlay-skip-back').addEventListener('click', (e) => { e.stopPropagation(); Player.skip(-10); });
         DOM.get('overlay-skip-forward').addEventListener('click', (e) => { e.stopPropagation(); Player.skip(10); });
         DOM.get('custom-skip-back-btn').addEventListener('click', (e) => { e.stopPropagation(); Player.skip(-10); });
         DOM.get('custom-skip-forward-btn').addEventListener('click', (e) => { e.stopPropagation(); Player.skip(10); });
-        
+
         // Close player
         DOM.get('close-player-btn').addEventListener('click', () => Player.close());
-        
+
         // Progress bar seeking
         const progressBar = DOM.get('progress-bar');
         progressBar.addEventListener('input', (e) => Player.onSeekInput(e));
         progressBar.addEventListener('change', (e) => Player.onSeekChange(e));
-        
+
         // Volume controls
         DOM.get('custom-mute-btn').addEventListener('click', (e) => { e.stopPropagation(); Player.toggleMute(); });
         DOM.get('volume-slider').addEventListener('input', (e) => Player.setVolume(parseFloat(e.target.value)));
-        
+
         // Settings panel toggles
         DOM.get('custom-settings-btn').addEventListener('click', (e) => {
             e.stopPropagation();
             Player.toggleSettings();
         });
-        
+
         document.addEventListener('click', (e) => {
             if (Player.isSettingsOpen && !e.target.closest('.settings-menu-container')) {
                 Player.toggleSettings(false);
             }
         });
-        
+
         // Fullscreen
         DOM.get('custom-fullscreen-btn').addEventListener('click', (e) => { e.stopPropagation(); Player.toggleFullscreen(); });
-        
+
         // Auto-hide controls triggers (desktop mouse only, ignore synthetic touch events)
         const wrapper = DOM.get('player-wrapper');
         let lastTouchTime = 0;
@@ -114,7 +114,7 @@ window.Player = {
         wrapper.addEventListener('mouseleave', () => {
             if (Date.now() - lastTouchTime > 500) Player.hideControlsImmediately();
         });
-        
+
         // Keyboard controls
         document.addEventListener('keydown', (e) => Player.handleKeyboard(e));
 
@@ -130,7 +130,7 @@ window.Player = {
         DOM.get('custom-fullscreen-btn').innerHTML = Icons.fullscreen;
         DOM.get('close-player-btn').innerHTML = Icons.close;
     },
-    
+
     launch: async (media) => {
         Player.currentMedia = media;
         DOM.show('player-section');
@@ -141,22 +141,25 @@ window.Player = {
         Player.toggleSettings(false);
         Player.isFallbackTriggered = false;
         Player.clearLoadTimeout();
-        
+
         try {
             const result = await Providers.getSources(
                 media.tmdbId,
                 media.type,
                 media.season,
-                media.episode
+                media.episode,
+                media.slug,
+                media.title,
+                media.year
             );
-            
+
             if (!result.sources || result.sources.length === 0) {
                 console.error(`[Player Error Log] Source lookup failed for TMDB ID: ${media.tmdbId}, Type: ${media.type}, Error: ${result.error || 'No sources found'}`);
                 showToast('No sources found', 'error');
                 Player.close();
                 return;
             }
-            
+
             // Store ALL quality variants
             Player.allQualities = result.sources;
             Player.currentSubtitles = result.subtitles || [];
@@ -173,7 +176,7 @@ window.Player = {
                     Player.activeSubtitleIndex = englishIdx;
                 }
             }
-            
+
             // Group by provider: pick HIGHEST quality per provider as default
             const providerMap = {};
             for (const src of Player.allQualities) {
@@ -211,35 +214,35 @@ window.Player = {
                 q => q.url === selectedSource.url
             );
             if (Player.currentQualityIndex === -1) Player.currentQualityIndex = 0;
-            
+
             Player.switchSource(Player.currentQualityIndex);
             Player.startProgressHeartbeat();
-            
+
             // Update UI
             DOM.get('player-title').textContent = media.title;
             let meta = media.type === 'movie' ? 'Movie' : `S${media.season} E${media.episode}`;
             DOM.get('player-meta').textContent = meta;
-            
+
             // Scroll to player
             setTimeout(() => {
                 DOM.get('player-section').scrollIntoView({ behavior: 'smooth' });
             }, 100);
-            
+
         } catch (e) {
             console.error('Failed to launch player:', e);
             showToast('Failed to load player', 'error');
             Player.close();
         }
     },
-    
+
     switchSource: async (index) => {
         if (index < 0 || index >= Player.allQualities.length) return;
-        
+
         Player.currentQualityIndex = index;
         const source = Player.allQualities[index];
-        
+
         Player.showLoader(true, `Loading ${source.quality || source.provider}...`);
-        
+
         // Cleanup old HLS instance
         if (Player.hls) {
             try {
@@ -249,27 +252,72 @@ window.Player = {
             }
             Player.hls = null;
         }
-        
+
         Player.videoElement.pause();
         Player.videoElement.src = '';
-        
+
         Player.isFallbackTriggered = false;
         Player.startLoadTimeout();
-        
+
+        // Update player title to show the current active provider
+        DOM.get('player-title').textContent = `${Player.currentMedia.title} (${source.provider})`;
+
         try {
-            if (source.type === 'hls') {
-                Player.loadHLSStream(source);
+            // Handle iframe vs standard media playback
+            let iframe = DOM.get('player-iframe');
+            if (source.type === 'iframe') {
+                Player.clearLoadTimeout();
+                Player.showLoader(false);
+                
+                DOM.hide('video-player');
+                DOM.hide('video-click-overlay');
+                DOM.hide('player-center-controls');
+                DOM.hide('custom-player-controls');
+                DOM.hide('subtitle-overlay');
+                
+                if (!iframe) {
+                    iframe = document.createElement('iframe');
+                    iframe.id = 'player-iframe';
+                    iframe.className = 'video-player';
+                    iframe.style.border = 'none';
+                    iframe.style.width = '100%';
+                    iframe.style.height = '100%';
+                    iframe.style.position = 'absolute';
+                    iframe.style.top = '0';
+                    iframe.style.left = '0';
+                    iframe.style.zIndex = '4';
+                    DOM.get('player-wrapper').appendChild(iframe);
+                }
+                iframe.src = source.url;
+                iframe.classList.remove('hidden');
             } else {
-                Player.loadDirectStream(source);
+                DOM.show('video-player');
+                DOM.show('video-click-overlay');
+                DOM.show('player-center-controls');
+                DOM.show('custom-player-controls');
+                if (Player.activeSubtitleIndex !== -1) {
+                    DOM.show('subtitle-overlay');
+                }
+                if (iframe) {
+                    iframe.classList.add('hidden');
+                    iframe.src = 'about:blank';
+                }
+
+                if (source.type === 'hls') {
+                    Player.loadHLSStream(source);
+                } else {
+                    Player.loadDirectStream(source);
+                }
             }
+
             Player.updateSourceMenu();
             Player.updateExternalSourceMenu();
             Player.updateSubtitleMenu();
             Player.updateSpeedMenu();
             Player.updateQualityMenu();
-            
-            // Auto-load selected subtitle
-            if (Player.activeSubtitleIndex !== -1 && Player.currentSubtitles[Player.activeSubtitleIndex]) {
+
+            // Auto-load selected subtitle (only for non-iframe)
+            if (source.type !== 'iframe' && Player.activeSubtitleIndex !== -1 && Player.currentSubtitles[Player.activeSubtitleIndex]) {
                 const sub = Player.currentSubtitles[Player.activeSubtitleIndex];
                 Player.loadSubtitlesFile(sub.url);
             }
@@ -282,7 +330,7 @@ window.Player = {
     loadHLSStream: (source) => {
         const sanitizedUrl = Player.sanitizeStreamUrl(source.url);
         console.log('Loading HLS stream:', sanitizedUrl);
-        
+
         if (!window.Hls || !Hls.isSupported()) {
             if (Player.videoElement.canPlayType('application/vnd.apple.mpegurl')) {
                 console.log('[Player] Using native HLS playback (no MSE support)');
@@ -303,17 +351,17 @@ window.Player = {
             showToast('HLS.js not available and no native HLS support', 'error');
             return;
         }
-        
+
         Player.hls = new Hls({
             debug: false,
             enableWorker: true,
             maxBufferLength: 15,
             maxMaxBufferLength: 30,
         });
-        
+
         Player.hls.on(Hls.Events.MANIFEST_PARSED, () => {
             Player.clearLoadTimeout();
-            
+
             // Auto-select highest quality level
             if (Player.hls.levels && Player.hls.levels.length > 0) {
                 let highestIdx = 0;
@@ -327,20 +375,20 @@ window.Player = {
                 Player.hls.currentLevel = highestIdx;
                 console.log(`[Player] Automatically selected highest HLS level: ${maxHeight}p`);
             }
-            
+
             Player.showLoader(false);
-            
+
             if (Player.currentMedia && Player.currentMedia.timestamp) {
                 Player.videoElement.currentTime = Player.currentMedia.timestamp;
             }
-            
+
             Player.videoElement.playbackRate = Player.currentSpeed;
-            
+
             Player.videoElement.play().catch(() => {
                 console.warn('Autoplay prevented');
             });
         });
-        
+
         Player.hls.on(Hls.Events.ERROR, (event, data) => {
             const failingUrl = data.url || (data.frag && data.frag.url) || (data.networkDetails && data.networkDetails.url) || 'unknown URL';
             console.error(`[Player Error Log] Event: ${event}, Type: ${data.type}, Detail: ${data.details}, URL: ${failingUrl}, Fatal: ${data.fatal}`);
@@ -348,32 +396,32 @@ window.Player = {
                 Player.handlePlaybackError(new Error(`HLS Fatal Error: [${data.details || data.type}] at ${failingUrl}`));
             }
         });
-        
+
         Player.hls.loadSource(sanitizedUrl);
         Player.hls.attachMedia(Player.videoElement);
     },
-    
+
     loadDirectStream: (source) => {
         const sanitizedUrl = Player.sanitizeStreamUrl(source.url);
         console.log('Loading Direct stream:', sanitizedUrl);
-        
+
         Player.videoElement.src = sanitizedUrl;
         Player.videoElement.onloadedmetadata = () => {
             Player.clearLoadTimeout();
             Player.showLoader(false);
-            
+
             if (Player.currentMedia && Player.currentMedia.timestamp) {
                 Player.videoElement.currentTime = Player.currentMedia.timestamp;
             }
-            
+
             Player.videoElement.playbackRate = Player.currentSpeed;
-            Player.videoElement.play().catch(() => {});
+            Player.videoElement.play().catch(() => { });
         };
     },
-    
+
     togglePlay: () => {
         if (Player.videoElement.paused) {
-            Player.videoElement.play().catch(() => {});
+            Player.videoElement.play().catch(() => { });
         } else {
             Player.videoElement.pause();
         }
@@ -405,11 +453,11 @@ window.Player = {
             }
         }
     },
-    
+
     onPlayStateChange: (isPlaying) => {
         const overlayPlay = DOM.get('overlay-play-pause');
         const customPlay = DOM.get('custom-play-btn');
-        
+
         if (isPlaying) {
             overlayPlay.innerHTML = Icons.pause;
             customPlay.innerHTML = Icons.pause;
@@ -420,13 +468,13 @@ window.Player = {
             Player.showControlsTemporarily(true);
         }
     },
-    
+
     onTimeUpdate: () => {
         const time = Player.videoElement.currentTime;
         const duration = Player.videoElement.duration || 0;
-        
+
         DOM.get('custom-time-display').textContent = `${formatTime(time)} / ${formatTime(duration)}`;
-        
+
         const progressBar = DOM.get('progress-bar');
         const fillBar = DOM.get('progress-fill-bar');
         if (duration > 0) {
@@ -437,7 +485,7 @@ window.Player = {
             progressBar.value = 0;
             fillBar.style.width = '0%';
         }
-        
+
         Player.syncSubtitles(time);
     },
 
@@ -481,12 +529,12 @@ window.Player = {
             await window.renderHistory();
         }
     },
-    
+
     onSeekInput: (e) => {
         const percent = parseFloat(e.target.value);
         DOM.get('progress-fill-bar').style.width = `${percent}%`;
     },
-    
+
     onSeekChange: (e) => {
         const percent = parseFloat(e.target.value);
         const duration = Player.videoElement.duration || 0;
@@ -495,12 +543,12 @@ window.Player = {
             Player.saveCurrentProgress();
         }
     },
-    
+
     toggleMute: () => {
         Player.videoElement.muted = !Player.videoElement.muted;
         const muteBtn = DOM.get('custom-mute-btn');
         const volumeSlider = DOM.get('volume-slider');
-        
+
         if (Player.videoElement.muted) {
             muteBtn.innerHTML = Icons.volumeMute;
             volumeSlider.value = 0;
@@ -510,11 +558,11 @@ window.Player = {
         }
         showToast(Player.videoElement.muted ? 'Muted' : 'Unmuted', 'info', 800);
     },
-    
+
     setVolume: (volume) => {
         Player.videoElement.volume = volume;
         Player.videoElement.muted = (volume === 0);
-        
+
         const muteBtn = DOM.get('custom-mute-btn');
         if (volume === 0) {
             muteBtn.innerHTML = Icons.volumeMute;
@@ -524,17 +572,17 @@ window.Player = {
             muteBtn.innerHTML = Icons.volumeHigh;
         }
     },
-    
+
     toggleSettings: (forceState = null) => {
         const panel = DOM.get('settings-panel');
         const customBtn = DOM.get('custom-settings-btn');
-        
+
         if (forceState !== null) {
             Player.isSettingsOpen = forceState;
         } else {
             Player.isSettingsOpen = !Player.isSettingsOpen;
         }
-        
+
         if (Player.isSettingsOpen) {
             panel.classList.remove('hidden');
             customBtn.style.color = 'var(--accent-light)';
@@ -543,7 +591,7 @@ window.Player = {
             customBtn.style.color = '';
         }
     },
-    
+
     updateQualityMenu: () => {
         const listContainer = DOM.get('settings-quality-list');
         listContainer.innerHTML = '';
@@ -577,10 +625,13 @@ window.Player = {
             return;
         }
 
-        // For direct MP4 sources, show all available qualities from allQualities
+        // For direct MP4 sources, show all available qualities from the current active provider
         if (Player.allQualities && Player.allQualities.length > 0) {
+            const currentProvider = Player.allQualities[Player.currentQualityIndex]?.provider;
+            const filteredQualities = Player.allQualities.filter(q => q.provider === currentProvider);
+            
             // Sort qualities descending (highest first)
-            const sortedQualities = [...Player.allQualities].sort((a, b) => {
+            const sortedQualities = [...filteredQualities].sort((a, b) => {
                 return (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0);
             });
 
@@ -603,12 +654,12 @@ window.Player = {
             listContainer.appendChild(fallbackOpt);
         }
     },
-    
+
     updateSpeedMenu: () => {
         const listContainer = DOM.get('settings-speed-list');
         if (!listContainer) return;
         listContainer.innerHTML = '';
-        
+
         const speeds = [1.0, 1.25, 1.5, 1.75, 2.0];
         speeds.forEach((speed) => {
             const opt = document.createElement('div');
@@ -626,11 +677,11 @@ window.Player = {
             listContainer.appendChild(opt);
         });
     },
-    
+
     updateSubtitleMenu: () => {
         const listContainer = DOM.get('settings-subtitle-list');
         listContainer.innerHTML = '';
-        
+
         const offOpt = document.createElement('div');
         offOpt.className = 'settings-option' + (Player.activeSubtitleIndex === -1 ? ' active' : '');
         offOpt.textContent = 'Off';
@@ -643,7 +694,7 @@ window.Player = {
             Player.updateSubtitleMenu();
         });
         listContainer.appendChild(offOpt);
-        
+
         if (Player.currentSubtitles && Player.currentSubtitles.length > 0) {
             Player.currentSubtitles.forEach((sub, i) => {
                 const opt = document.createElement('div');
@@ -667,11 +718,11 @@ window.Player = {
             listContainer.appendChild(noSubOpt);
         }
     },
-    
+
     updateSourceMenu: () => {
         const listContainer = DOM.get('settings-source-list');
         listContainer.innerHTML = '';
-        
+
         // Show one entry per provider (not per quality)
         Player.currentSources.forEach((src, i) => {
             const opt = document.createElement('div');
@@ -709,7 +760,7 @@ window.Player = {
         label.className = 'source-selector-label';
         label.textContent = 'Sources';
         selector.appendChild(label);
-        
+
         // One button per provider (no quality suffix)
         Player.currentSources.forEach((src, i) => {
             const btn = document.createElement('button');
@@ -728,14 +779,14 @@ window.Player = {
             selector.appendChild(btn);
         });
     },
-    
+
     loadSubtitlesFile: async (url) => {
         Player.subtitleCues = [];
         DOM.get('subtitle-overlay').classList.add('hidden');
         DOM.get('subtitle-overlay').innerHTML = '';
-        
+
         if (!url) return;
-        
+
         try {
             const response = await fetch(url);
             if (!response.ok) throw new Error('Subtitles response failed');
@@ -747,17 +798,17 @@ window.Player = {
             showToast('Failed to load subtitles', 'error');
         }
     },
-    
+
     parseSubtitlesText: (text) => {
         text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        
+
         const cues = [];
         const blocks = text.split(/\n\n+/);
-        
+
         for (const block of blocks) {
             const lines = block.trim().split('\n');
             if (lines.length < 2) continue;
-            
+
             let timeLineIndex = -1;
             for (let i = 0; i < lines.length; i++) {
                 if (lines[i].includes('-->')) {
@@ -765,34 +816,34 @@ window.Player = {
                     break;
                 }
             }
-            
+
             if (timeLineIndex === -1) continue;
-            
+
             const timeLine = lines[timeLineIndex];
             const textLines = lines.slice(timeLineIndex + 1);
-            
+
             const parts = timeLine.split('-->');
             if (parts.length !== 2) continue;
-            
+
             const start = Player.parseSubtitleTime(parts[0].trim());
             const end = Player.parseSubtitleTime(parts[1].trim());
             const content = textLines.join('<br>').replace(/<[^>]*>/g, '');
-            
+
             if (start !== null && end !== null && content.trim() !== '') {
                 cues.push({ start, end, text: content });
             }
         }
         return cues;
     },
-    
+
     parseSubtitleTime: (timeStr) => {
         const parts = timeStr.split(':');
         if (parts.length < 2) return null;
-        
+
         let hrs = 0;
         let mins = 0;
         let secsParts = [];
-        
+
         if (parts.length === 3) {
             hrs = parseFloat(parts[0]);
             mins = parseFloat(parts[1]);
@@ -801,19 +852,19 @@ window.Player = {
             mins = parseFloat(parts[0]);
             secsParts = parts[1].replace(',', '.').split('.');
         }
-        
+
         const secs = parseFloat(secsParts[0]);
         const ms = secsParts[1] ? parseFloat(secsParts[1]) / Math.pow(10, secsParts[1].length) : 0;
-        
+
         return hrs * 3600 + mins * 60 + secs + ms;
     },
-    
+
     syncSubtitles: (currentTime) => {
         if (Player.subtitleCues.length === 0) return;
-        
+
         const activeCue = Player.subtitleCues.find(cue => currentTime >= cue.start && currentTime <= cue.end);
         const overlay = DOM.get('subtitle-overlay');
-        
+
         if (activeCue) {
             overlay.innerHTML = `<span>${activeCue.text}</span>`;
             overlay.classList.remove('hidden');
@@ -821,16 +872,16 @@ window.Player = {
             overlay.classList.add('hidden');
         }
     },
-    
+
     showControlsTemporarily: (keepOpen = false) => {
         const wrapper = DOM.get('player-wrapper');
         wrapper.classList.remove('player-controls-hidden');
         Player.isHUDVisible = true;
-        
+
         if (Player.controlsTimeout) {
             clearTimeout(Player.controlsTimeout);
         }
-        
+
         if (!keepOpen && !Player.videoElement.paused && !Player.isSettingsOpen) {
             Player.controlsTimeout = setTimeout(() => {
                 if (!Player.videoElement.paused && !Player.isSettingsOpen) {
@@ -840,14 +891,14 @@ window.Player = {
             }, 3000);
         }
     },
-    
+
     hideControlsImmediately: () => {
         if (!Player.videoElement.paused && !Player.isSettingsOpen) {
             DOM.get('player-wrapper').classList.add('player-controls-hidden');
             Player.isHUDVisible = false;
         }
     },
-    
+
     toggleFullscreen: () => {
         const wrapper = DOM.get('player-wrapper');
         if (!document.fullscreenElement) {
@@ -866,7 +917,7 @@ window.Player = {
             DOM.get('custom-fullscreen-btn').innerHTML = Icons.fullscreen;
         }
     },
-    
+
     onLoadedMetadata: () => {
         Player.clearLoadTimeout();
         Player.showLoader(false);
@@ -876,20 +927,20 @@ window.Player = {
         await Player.saveCurrentProgress();
         Player.stopProgressHeartbeat();
     },
-    
+
     onError: () => {
         if (!Player.currentMedia) return;
-        
+
         const src = Player.videoElement.src;
         if (!src || src === window.location.href || src.replace(/\/+$/, '') === window.location.origin) {
             return;
         }
-        
+
         const err = Player.videoElement.error;
         console.error('Video element error:', err);
         Player.handlePlaybackError(new Error(err ? err.message || `Code ${err.code}` : 'HTML5 Video Error'));
     },
-    
+
     showLoader: (show, text = '') => {
         const loader = DOM.get('player-loader');
         if (show) {
@@ -899,10 +950,10 @@ window.Player = {
             DOM.hide(loader);
         }
     },
-    
+
     handleKeyboard: (e) => {
         if (!Player.currentMedia || DOM.get('player-section').classList.contains('hidden')) return;
-        
+
         switch (e.key) {
             case ' ':
                 e.preventDefault();
@@ -944,53 +995,18 @@ window.Player = {
                 break;
         }
     },
-    
+
     skip: (seconds) => {
         Player.videoElement.currentTime = Math.max(0, Player.videoElement.currentTime + seconds);
         Player.saveCurrentProgress();
         Player.showControlsTemporarily();
     },
-    
+
     sanitizeStreamUrl: (url) => {
-        if (!url) return url;
-        const parts = url.split('?');
-        let path = parts[0];
-        try {
-            path = decodeURIComponent(path);
-        } catch (e) {
-            path = path.replace(/%2F/gi, '/').replace(/%2B/gi, '+').replace(/%3D/gi, '=');
-        }
-        
-        let proxyHeadersParam = '';
-        if (parts.length > 1) {
-            try {
-                const queryParams = new URLSearchParams(parts[1]);
-                const headersStr = queryParams.get('headers');
-                if (headersStr) {
-                    let decodedHeaders = headersStr;
-                    if (headersStr.includes('%22') || headersStr.includes('%7B')) {
-                        decodedHeaders = decodeURIComponent(headersStr);
-                    }
-                    const headersJson = JSON.parse(decodedHeaders);
-                    
-                    const scraperUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
-                    headersJson['User-Agent'] = scraperUA;
-                    headersJson['user-agent'] = scraperUA;
-                    
-                    proxyHeadersParam = `&proxyHeaders=${btoa(JSON.stringify(headersJson))}`;
-                    queryParams.delete('headers');
-                }
-                path = `${path}?${queryParams.toString()}`;
-            } catch (e) {
-                console.error('Failed to parse query params in sanitizeStreamUrl:', e);
-                path = `${path}?${parts.slice(1).join('?')}`;
-            }
-        }
-        
-        const apiUrl = import.meta.env.VITE_HF_API_URL || 'http://localhost:7860';
-        return `${apiUrl}/api/proxy?url=${encodeURIComponent(path)}${proxyHeadersParam}`;
+        // Just return the URL as-is – no proxy rewriting
+        return url;
     },
-    
+
     startLoadTimeout: () => {
         Player.clearLoadTimeout();
         Player.loadTimeout = setTimeout(() => {
@@ -998,21 +1014,21 @@ window.Player = {
             Player.handlePlaybackError(new Error('Load timeout (15s)'));
         }, 15000);
     },
-    
+
     clearLoadTimeout: () => {
         if (Player.loadTimeout) {
             clearTimeout(Player.loadTimeout);
             Player.loadTimeout = null;
         }
     },
-    
+
     handlePlaybackError: (err) => {
         console.warn('Playback error encountered:', err);
         Player.clearLoadTimeout();
-        
+
         if (Player.isFallbackTriggered) return;
         Player.isFallbackTriggered = true;
-        
+
         if (Player.hls) {
             try {
                 Player.hls.destroy();
@@ -1021,12 +1037,12 @@ window.Player = {
             }
             Player.hls = null;
         }
-        
+
         if (Player.videoElement) {
             Player.videoElement.pause();
             Player.videoElement.src = '';
         }
-        
+
         // Try next quality in allQualities
         const nextIndex = Player.currentQualityIndex + 1;
         if (nextIndex < Player.allQualities.length) {
@@ -1041,7 +1057,7 @@ window.Player = {
             showToast('All playback sources failed to load', 'error', 4000);
         }
     },
-    
+
     close: async () => {
         await Player.saveCurrentProgress();
         Player.stopProgressHeartbeat();
@@ -1054,19 +1070,26 @@ window.Player = {
             Player.hls.destroy();
             Player.hls = null;
         }
-        
+
         Player.videoElement.pause();
         Player.videoElement.src = '';
         Player.subtitleCues = [];
         Player.activeSubtitleIndex = -1;
         Player.currentSpeed = 1.0;
-        
+
         DOM.hide('subtitle-overlay');
         DOM.hide('player-section');
         const extSelector = DOM.get('external-source-selector');
         if (extSelector) extSelector.classList.add('hidden');
-        Player.toggleSettings(false);
         
+        const iframe = DOM.get('player-iframe');
+        if (iframe) {
+            iframe.src = 'about:blank';
+            iframe.classList.add('hidden');
+        }
+
+        Player.toggleSettings(false);
+
         Player.currentMedia = null;
         Player.currentSources = [];
         Player.allQualities = [];

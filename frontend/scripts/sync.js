@@ -4,7 +4,7 @@
  */
 
 window.SyncEngine = {
-    apiUrl: import.meta.env.VITE_HF_API_URL || 'http://localhost:7860',
+    apiUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
     userId: null,
     syncInterval: 10000, // 10 seconds
     syncTimeout: null,

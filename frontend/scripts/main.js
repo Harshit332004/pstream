@@ -103,12 +103,14 @@ function renderSearchResults(results) {
             const type = DOM.get('media-type').value;
             
             if (type === 'tv') {
-                handleTVSelect(item.id, title);
+                handleTVSelect(item.id, title, item.slug);
             } else {
                 Player.launch({
                     tmdbId: item.id,
                     type: 'movie',
-                    title: title
+                    title: title,
+                    slug: item.slug,
+                    year: year
                 });
             }
             
@@ -139,15 +141,17 @@ function setupTVSelector() {
             tmdbId: tvData.id,
             type: 'tv',
             title: tvData.title,
+            slug: tvData.slug,
             season: parseInt(seasonSelect.value),
-            episode: parseInt(episodeSelect.value)
+            episode: parseInt(episodeSelect.value),
+            year: tvData.year
         });
         
         DOM.hide('tv-selector');
     });
 }
 
-async function handleTVSelect(seriesId, title) {
+async function handleTVSelect(seriesId, title, slug) {
     DOM.show('tv-selector');
     DOM.get('tv-title').textContent = title;
     
@@ -156,7 +160,8 @@ async function handleTVSelect(seriesId, title) {
     
     try {
         const tvData = await tmdbApi.getTvDetails(seriesId);
-        window.currentTvData = { id: seriesId, title };
+        const year = tvData.first_air_date?.split('-')[0] || '2024';
+        window.currentTvData = { id: seriesId, title, slug, year };
         
         const seasonSelect = DOM.get('season-select');
         seasonSelect.innerHTML = '<option value="">Select Season</option>';
